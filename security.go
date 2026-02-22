@@ -94,12 +94,12 @@ func MonitorARP(ifaceName string, baseline map[string]string, gatewayIP string, 
 			}
 		}
 
-		// Track MAC flapping (3+ changes in 60 seconds)
+		// Track MAC flapping (2+ distinct MACs in 30 seconds)
 		macHistory[ipStr] = append(macHistory[ipStr], macChange{mac: macStr, t: now})
 		// Clean old entries
 		var recent []macChange
 		for _, mc := range macHistory[ipStr] {
-			if now.Sub(mc.t) <= 60*time.Second {
+			if now.Sub(mc.t) <= 30*time.Second {
 				recent = append(recent, mc)
 			}
 		}
@@ -110,7 +110,7 @@ func MonitorARP(ifaceName string, baseline map[string]string, gatewayIP string, 
 		for _, mc := range recent {
 			distinctMACs[mc.mac] = true
 		}
-		if len(distinctMACs) >= 3 {
+		if len(distinctMACs) >= 2 {
 			key := "flapping:" + ipStr
 			if !alertSeen[key] {
 				alertSeen[key] = true
@@ -122,7 +122,7 @@ func MonitorARP(ifaceName string, baseline map[string]string, gatewayIP string, 
 					IP:        ipStr,
 					AlertType: "flapping",
 					Severity:  severity,
-					Message:   fmt.Sprintf("MAC Flapping 감지: %s (60초 내 %d회 변경)", ipStr, len(distinctMACs)),
+					Message:   fmt.Sprintf("MAC Flapping 감지: %s (30초 내 %d개 MAC 관측)", ipStr, len(distinctMACs)),
 					Timestamp: now.Format("2006-01-02 15:04:05"),
 				})
 			}

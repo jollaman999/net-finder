@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"net"
+	"os"
 	"sort"
 	"strings"
 )
@@ -151,6 +154,34 @@ func groupMACsByDevice(macs []net.HardwareAddr) [][]net.HardwareAddr {
 	groups = append(groups, current)
 
 	return groups
+}
+
+// getDefaultGateway reads the default gateway from /proc/net/route
+func getDefaultGateway() string {
+	f, err := os.Open("/proc/net/route")
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Scan() // skip header
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 3 {
+			continue
+		}
+		// Destination == 00000000 means default route, skip if gateway is also 00000000
+		if fields[1] == "00000000" && fields[2] != "00000000" {
+			gw, err := hex.DecodeString(fields[2])
+			if err != nil || len(gw) != 4 {
+				continue
+			}
+			// /proc/net/route stores in little-endian
+			return fmt.Sprintf("%d.%d.%d.%d", gw[3], gw[2], gw[1], gw[0])
+		}
+	}
+	return ""
 }
 
 func sortIPStrings(ips []string) {

@@ -811,16 +811,18 @@ func (s *Scanner) backgroundARPMonitor() {
 	}
 	s.arpResult.mu.Unlock()
 
-	// Find gateway IP
-	gatewayIP := ""
-	s.state.mu.RLock()
-	for _, srv := range s.state.DHCPServers {
-		if srv.Router != "" {
-			gatewayIP = srv.Router
-			break
+	// Find gateway IP (routing table first, then DHCP)
+	gatewayIP := getDefaultGateway()
+	if gatewayIP == "" {
+		s.state.mu.RLock()
+		for _, srv := range s.state.DHCPServers {
+			if srv.Router != "" {
+				gatewayIP = srv.Router
+				break
+			}
 		}
+		s.state.mu.RUnlock()
 	}
-	s.state.mu.RUnlock()
 
 	for {
 		select {
@@ -829,7 +831,7 @@ func (s *Scanner) backgroundARPMonitor() {
 		default:
 		}
 
-		alerts, err := MonitorARP(s.iface.Name, baseline, gatewayIP, 30*time.Second, s.bgStopCh)
+		alerts, err := MonitorARP(s.iface.Name, baseline, gatewayIP, 5*time.Second, s.bgStopCh)
 		if err != nil {
 			log.Printf("ARP 모니터 오류: %v", err)
 			continue
