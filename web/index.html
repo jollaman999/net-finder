@@ -459,8 +459,9 @@ tr.subnet-header:hover { background: var(--primary-light); }
             <th onclick="sortTable('lldp-table',2)">시스템 이름<span class="sort-arrow"></span></th>
             <th onclick="sortTable('lldp-table',3)">시스템 설명<span class="sort-arrow"></span></th>
             <th onclick="sortTable('lldp-table',4)">관리 주소<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('lldp-table',5)">TTL<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('lldp-table',6)">시간<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('lldp-table',5)">소스 MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('lldp-table',6)">TTL<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('lldp-table',7)">시간<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -475,11 +476,12 @@ tr.subnet-header:hover { background: var(--primary-light); }
           <tr>
             <th onclick="sortTable('cdp-table',0)">장치 ID<span class="sort-arrow"></span></th>
             <th onclick="sortTable('cdp-table',1)">주소<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('cdp-table',2)">포트 ID<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('cdp-table',3)">플랫폼<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('cdp-table',4)">버전<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('cdp-table',5)">Native VLAN<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('cdp-table',6)">시간<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',2)">소스 MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',3)">포트 ID<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',4)">플랫폼<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',5)">버전<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',6)">Native VLAN<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',7)">시간<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -535,6 +537,9 @@ let pollTimer = null;
 // Raw data (kept across polls so render can use sort/collapse state)
 let rawHosts = [];
 let rawConflicts = [];
+
+// MAC→IP lookup (built from rawHosts each poll)
+let macToIP = {};
 
 // Collapse state per table: Set of collapsed subnet strings
 const collapsed = { hosts: new Set(), conflicts: new Set() };
@@ -603,13 +608,25 @@ async function pollData() {
 
     rawHosts = hosts || [];
     rawConflicts = conflicts || [];
+
+    // Build MAC→IP lookup from hosts
+    macToIP = {};
+    rawHosts.forEach(h => {
+      macToIP[h.mac.toUpperCase()] = h.ip;
+      if (h.bondMACs) h.bondMACs.forEach(m => { macToIP[m.toUpperCase()] = h.ip; });
+    });
+
     renderHostsTable();
     renderConflictsTable();
     renderSimpleTable('dhcp-table', 'empty-dhcp', dhcp, renderDHCPRow);
     renderSimpleTable('hsrp-table', 'empty-hsrp', hsrp, renderHSRPRow);
     renderSimpleTable('vrrp-table', 'empty-vrrp', vrrp, renderVRRPRow);
-    renderSimpleTable('lldp-table', 'empty-lldp', lldp, renderLLDPRow);
-    renderSimpleTable('cdp-table', 'empty-cdp', cdp, renderCDPRow);
+
+    // LLDP/CDP: default sort by device ID
+    const sortedLLDP = [...(lldp||[])].sort((a,b) => (a.chassisID||'').localeCompare(b.chassisID||''));
+    const sortedCDP = [...(cdp||[])].sort((a,b) => (a.deviceID||'').localeCompare(b.deviceID||''));
+    renderSimpleTable('lldp-table', 'empty-lldp', sortedLLDP, renderLLDPRow);
+    renderSimpleTable('cdp-table', 'empty-cdp', sortedCDP, renderCDPRow);
     renderSimpleTable('arp-alert-table', 'empty-arp-alert', arpAlerts, renderARPAlertRow);
     renderSimpleTable('dns-alert-table', 'empty-dns-alert', dnsAlerts, renderDNSAlertRow);
     updateBadges(rawHosts, rawConflicts, dhcp, arpAlerts, dnsAlerts);
@@ -807,11 +824,21 @@ function renderHSRPRow(e) {
 function renderVRRPRow(e) {
   return `<tr><td>v${e.version}</td><td>${e.routerID}</td><td>${e.priority}</td><td>${(e.ipAddresses||[]).map(esc).join(', ')}</td><td>${esc(e.sourceIP)}</td><td>${e.adverInt}s</td><td>${esc(e.timestamp)}</td></tr>`;
 }
+function lookupMAC(mac) {
+  if (!mac) return '';
+  return macToIP[mac.toUpperCase()] || '';
+}
 function renderLLDPRow(e) {
-  return `<tr><td>${esc(e.chassisID)}</td><td>${esc(e.portID)}</td><td>${esc(e.sysName)}</td><td>${esc(e.sysDesc)}</td><td>${esc(e.mgmtAddr)}</td><td>${e.ttl}</td><td>${esc(e.timestamp)}</td></tr>`;
+  const addr = e.mgmtAddr || lookupMAC(e.sourceMAC) || lookupMAC(e.chassisID) || '';
+  return `<tr><td>${esc(e.chassisID)}</td><td>${esc(e.portID)}</td><td>${esc(e.sysName)}</td><td>${esc(e.sysDesc)}</td><td>${esc(addr)}</td><td class="mac-cell">${esc((e.sourceMAC||'').toUpperCase())}</td><td>${e.ttl}</td><td>${esc(e.timestamp)}</td></tr>`;
 }
 function renderCDPRow(e) {
-  return `<tr><td>${esc(e.deviceID)}</td><td>${(e.addresses||[]).map(esc).join(', ')}</td><td>${esc(e.portID)}</td><td>${esc(e.platform)}</td><td>${esc(e.version)}</td><td>${e.nativeVLAN||'-'}</td><td>${esc(e.timestamp)}</td></tr>`;
+  let addrs = e.addresses || [];
+  if (addrs.length === 0) {
+    const ip = lookupMAC(e.sourceMAC);
+    if (ip) addrs = [ip];
+  }
+  return `<tr><td>${esc(e.deviceID)}</td><td>${addrs.map(esc).join(', ')}</td><td class="mac-cell">${esc((e.sourceMAC||'').toUpperCase())}</td><td>${esc(e.portID)}</td><td>${esc(e.platform)}</td><td>${esc(e.version)}</td><td>${e.nativeVLAN||'-'}</td><td>${esc(e.timestamp)}</td></tr>`;
 }
 function renderARPAlertRow(a) {
   return `<tr class="severity-${a.severity}"><td><span class="text-${a.severity==='critical'?'danger':'warning'}">${a.severity.toUpperCase()}</span></td><td>${esc(a.alertType)}</td><td>${esc(a.ip)}</td><td>${esc(a.message)}</td><td>${esc(a.timestamp)}</td></tr>`;

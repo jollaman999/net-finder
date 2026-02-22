@@ -85,17 +85,17 @@ func parseCDPPacket(packet gopacket.Packet) (CDPNeighbor, bool) {
 		entry.Version = strings.TrimSpace(info.Version)
 		entry.NativeVLAN = int(info.NativeVLAN)
 
-		for _, addr := range info.Addresses {
-			if len(addr) == 4 {
-				entry.Addresses = append(entry.Addresses, net.IP(addr).String())
+		seen := make(map[string]bool)
+		for _, addr := range append(info.Addresses, info.MgmtAddresses...) {
+			var s string
+			if ip4 := net.IP(addr).To4(); ip4 != nil {
+				s = ip4.String()
+			} else if len(addr) > 0 {
+				s = net.IP(addr).String()
 			}
-		}
-
-		if len(info.MgmtAddresses) > 0 {
-			for _, addr := range info.MgmtAddresses {
-				if len(addr) == 4 {
-					entry.Addresses = append(entry.Addresses, net.IP(addr).String())
-				}
+			if s != "" && !seen[s] {
+				seen[s] = true
+				entry.Addresses = append(entry.Addresses, s)
 			}
 		}
 
