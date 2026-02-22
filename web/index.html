@@ -541,6 +541,9 @@ let rawConflicts = [];
 // MAC→IP lookup (built from rawHosts each poll)
 let macToIP = {};
 
+// IP→conflict lookup (built from rawConflicts each poll)
+let conflictMap = {};
+
 // Collapse state per table: Set of collapsed subnet strings
 const collapsed = { hosts: new Set(), conflicts: new Set() };
 
@@ -615,6 +618,10 @@ async function pollData() {
       macToIP[h.mac.toUpperCase()] = h.ip;
       if (h.bondMACs) h.bondMACs.forEach(m => { macToIP[m.toUpperCase()] = h.ip; });
     });
+
+    // Build IP→conflict lookup
+    conflictMap = {};
+    rawConflicts.forEach(c => { conflictMap[c.ip] = c; });
 
     renderHostsTable();
     renderConflictsTable();
@@ -717,16 +724,22 @@ function renderHostsTable() {
     if (!isCollapsed) {
       for (const h of filtered) {
         idx++;
-        let macCell, vendorCell;
-        if (h.isBond && h.bondMACs && h.bondMACs.length > 0) {
+        const conf = conflictMap[h.ip];
+        let macCell, vendorCell, badge = '', rowClass = '';
+        if (conf) {
+          macCell = (conf.macs||[]).map(esc).join('<br>');
+          vendorCell = (conf.vendors||[]).map(esc).join('<br>');
+          badge = ' <span class="text-danger" style="font-size:11px;font-weight:600">[Conflicted]</span>';
+          rowClass = ' class="severity-critical"';
+        } else if (h.isBond && h.bondMACs && h.bondMACs.length > 0) {
           macCell = h.bondMACs.map(esc).join('<br>');
           vendorCell = (h.bondVendors||[]).map(esc).join('<br>');
+          badge = ' <span class="text-cyan" style="font-size:11px;font-weight:600">[Multi-NIC/Bond]</span>';
         } else {
           macCell = esc(h.mac);
           vendorCell = esc(h.vendor);
         }
-        const bondBadge = h.isBond ? ' <span class="text-cyan" style="font-size:11px;font-weight:600">[Multi-NIC/Bond]</span>' : '';
-        html += `<tr><td>${idx}</td><td>${esc(h.ip)}${bondBadge}</td><td>${esc(h.hostname||'-')}</td><td class="mac-cell">${macCell}</td><td>${vendorCell}</td></tr>`;
+        html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td>${esc(h.hostname||'-')}</td><td class="mac-cell">${macCell}</td><td>${vendorCell}</td></tr>`;
       }
     }
   }
