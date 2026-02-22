@@ -95,7 +95,6 @@ func expandCIDR(ipnet *net.IPNet) []net.IP {
 	hostBits := bits - ones
 
 	if hostBits > 16 {
-		fmt.Printf("경고: %s 서브넷이 너무 큽니다. /16 이하를 사용해주세요.\n", ipnet)
 		return nil
 	}
 

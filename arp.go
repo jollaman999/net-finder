@@ -78,7 +78,6 @@ func DiscoverSubnets(iface *net.Interface, duration time.Duration) ([]*net.IPNet
 		subnet := fmt.Sprintf("%d.%d.%d.0/24", ip[0], ip[1], ip[2])
 		if !seen[subnet] {
 			seen[subnet] = true
-			fmt.Printf("    발견: %s\n", subnet)
 		}
 	}
 
@@ -122,12 +121,6 @@ func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, su
 		ips := expandCIDR(subnet)
 		isLocal := localNet != nil && localNet.Contains(subnet.IP)
 
-		if isLocal {
-			fmt.Printf("  서브넷 %s 스캔 중 (%d개 호스트, ARP Request)...\n", subnet, len(ips))
-		} else {
-			fmt.Printf("  서브넷 %s 스캔 중 (%d개 호스트, ARP Probe)...\n", subnet, len(ips))
-		}
-
 		for _, ip := range ips {
 			if isLocal {
 				sendARPRequest(handle, iface, localIP, localMAC, ip)
@@ -138,7 +131,6 @@ func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, su
 		}
 	}
 
-	fmt.Printf("  응답 수집 중 (%v 대기)...\n", timeout)
 	time.Sleep(timeout)
 	close(done)
 	wg.Wait()

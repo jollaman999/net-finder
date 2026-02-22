@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Net Finder - 네트워크 스캐너</title>
+<style>
+:root {
+  --bg: #f5f5f5;
+  --surface: #ffffff;
+  --text: #1a1a1a;
+  --text-secondary: #666;
+  --border: #e0e0e0;
+  --primary: #1976d2;
+  --primary-light: #e3f2fd;
+  --danger: #d32f2f;
+  --danger-light: #ffebee;
+  --warning: #f57f17;
+  --warning-light: #fff8e1;
+  --success: #388e3c;
+  --success-light: #e8f5e9;
+  --cyan: #0097a7;
+  --tab-bg: #e8e8e8;
+  --tab-active: #ffffff;
+  --shadow: 0 1px 3px rgba(0,0,0,0.12);
+  --progress-bg: #e0e0e0;
+}
+[data-theme="dark"] {
+  --bg: #121212;
+  --surface: #1e1e1e;
+  --text: #e0e0e0;
+  --text-secondary: #999;
+  --border: #333;
+  --primary: #64b5f6;
+  --primary-light: #1a2733;
+  --danger: #ef5350;
+  --danger-light: #2c1515;
+  --warning: #ffb74d;
+  --warning-light: #2c2210;
+  --success: #66bb6a;
+  --success-light: #152215;
+  --cyan: #4dd0e1;
+  --tab-bg: #2a2a2a;
+  --tab-active: #1e1e1e;
+  --shadow: 0 1px 3px rgba(0,0,0,0.4);
+  --progress-bg: #333;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+.container { max-width: 1400px; margin: 0 auto; padding: 16px; }
+header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: var(--shadow);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+header h1 { font-size: 20px; font-weight: 600; }
+header h1 span { color: var(--primary); }
+.header-controls { display: flex; align-items: center; gap: 12px; }
+.btn {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: opacity 0.2s;
+}
+.btn:hover { opacity: 0.85; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-danger { background: var(--danger); color: #fff; }
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.theme-toggle input { display: none; }
+.toggle-track {
+  width: 36px;
+  height: 20px;
+  background: var(--border);
+  border-radius: 10px;
+  position: relative;
+  transition: background 0.2s;
+}
+.toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+.theme-toggle input:checked + .toggle-track {
+  background: var(--primary);
+}
+.theme-toggle input:checked + .toggle-track::after {
+  transform: translateX(16px);
+}
+.progress-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  margin: 16px 0;
+  box-shadow: var(--shadow);
+}
+.progress-bar-container {
+  width: 100%;
+  height: 8px;
+  background: var(--progress-bg);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.progress-bar {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 4px;
+  transition: width 0.3s;
+  width: 0%;
+}
+.progress-text {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+.status-idle { background: var(--border); color: var(--text-secondary); }
+.status-running { background: var(--primary-light); color: var(--primary); }
+.status-done { background: var(--success-light); color: var(--success); }
+.tabs {
+  display: flex;
+  background: var(--tab-bg);
+  border-radius: 6px 6px 0 0;
+  overflow-x: auto;
+  margin-top: 16px;
+}
+.tab {
+  padding: 10px 20px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  position: relative;
+  transition: all 0.2s;
+}
+.tab:hover { color: var(--text); }
+.tab.active {
+  background: var(--tab-active);
+  color: var(--primary);
+  border-radius: 6px 6px 0 0;
+}
+.tab .badge {
+  display: inline-block;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  margin-left: 6px;
+  color: #fff;
+}
+.badge-danger { background: var(--danger); }
+.badge-warning { background: var(--warning); }
+.badge-info { background: var(--primary); }
+.tab-content {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  padding: 16px;
+  min-height: 300px;
+  box-shadow: var(--shadow);
+}
+.panel { display: none; }
+.panel.active { display: block; }
+.search-box {
+  width: 100%;
+  max-width: 300px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+  margin-bottom: 12px;
+}
+.search-box::placeholder { color: var(--text-secondary); }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+th, td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+th {
+  background: var(--bg);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+}
+th:hover { background: var(--primary-light); }
+th .sort-arrow { margin-left: 4px; font-size: 10px; }
+tr:hover { background: var(--primary-light); }
+.text-danger { color: var(--danger); }
+.text-warning { color: var(--warning); }
+.text-success { color: var(--success); }
+.text-cyan { color: var(--cyan); }
+.severity-warning {
+  background: var(--warning-light);
+  border-left: 3px solid var(--warning);
+}
+.severity-critical {
+  background: var(--danger-light);
+  border-left: 3px solid var(--danger);
+}
+.empty-state {
+  text-align: center;
+  padding: 48px 16px;
+  color: var(--text-secondary);
+}
+.empty-state p { font-size: 14px; }
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.info-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+}
+.info-card h4 { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+.info-card .value { font-size: 16px; font-weight: 600; }
+.mac-cell { font-family: 'Courier New', monospace; font-size: 12px; }
+@media (max-width: 768px) {
+  .container { padding: 8px; }
+  header { padding: 8px 12px; flex-wrap: wrap; gap: 8px; }
+  .tabs { flex-wrap: nowrap; }
+  .tab { padding: 8px 12px; font-size: 12px; }
+  th, td { padding: 6px 8px; font-size: 12px; }
+  .info-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1><span>Net Finder</span> 네트워크 스캐너</h1>
+  <div class="header-controls">
+    <button id="btnScan" class="btn btn-primary" onclick="startScan()">스캔 시작</button>
+    <button id="btnStop" class="btn btn-danger" onclick="stopScan()" disabled>스캔 중지</button>
+    <label class="theme-toggle">
+      <input type="checkbox" id="themeSwitch" onchange="toggleTheme()">
+      <span class="toggle-track"></span>
+      다크모드
+    </label>
+  </div>
+</header>
+
+<div class="container">
+  <div class="progress-section">
+    <div class="progress-text">
+      <span><span class="status-badge status-idle" id="statusBadge">대기</span> <span id="progressDesc"></span></span>
+      <span id="progressPercent">0%</span>
+    </div>
+    <div class="progress-bar-container">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+  </div>
+
+  <div class="tabs" id="tabBar">
+    <button class="tab active" data-tab="hosts" onclick="switchTab('hosts')">호스트 목록 <span class="badge badge-info" id="badge-hosts" style="display:none">0</span></button>
+    <button class="tab" data-tab="conflicts" onclick="switchTab('conflicts')">IP 충돌 <span class="badge badge-danger" id="badge-conflicts" style="display:none">0</span></button>
+    <button class="tab" data-tab="dhcp" onclick="switchTab('dhcp')">DHCP 서버 <span class="badge badge-info" id="badge-dhcp" style="display:none">0</span></button>
+    <button class="tab" data-tab="protocols" onclick="switchTab('protocols')">HSRP/VRRP</button>
+    <button class="tab" data-tab="discovery" onclick="switchTab('discovery')">LLDP/CDP</button>
+    <button class="tab" data-tab="security" onclick="switchTab('security')">보안 <span class="badge badge-danger" id="badge-security" style="display:none">0</span></button>
+  </div>
+
+  <div class="tab-content">
+    <!-- Hosts Panel -->
+    <div class="panel active" id="panel-hosts">
+      <input type="text" class="search-box" placeholder="검색 (IP, 호스트명, MAC, 벤더...)" oninput="filterTable('hosts-table', this.value)">
+      <div style="overflow-x:auto">
+      <table id="hosts-table">
+        <thead>
+          <tr>
+            <th onclick="sortTable('hosts-table',0)">#<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hosts-table',1)">IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hosts-table',2)">호스트명<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hosts-table',3)">MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hosts-table',4)">벤더<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hosts-table',5)">서브넷<span class="sort-arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="empty-state" id="empty-hosts"><p>스캔을 시작하면 발견된 호스트가 여기에 표시됩니다.</p></div>
+    </div>
+
+    <!-- Conflicts Panel -->
+    <div class="panel" id="panel-conflicts">
+      <input type="text" class="search-box" placeholder="검색..." oninput="filterTable('conflicts-table', this.value)">
+      <div style="overflow-x:auto">
+      <table id="conflicts-table">
+        <thead>
+          <tr>
+            <th onclick="sortTable('conflicts-table',0)">IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('conflicts-table',1)">유형<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('conflicts-table',2)">MAC 주소<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('conflicts-table',3)">벤더<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('conflicts-table',4)">서브넷<span class="sort-arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="empty-state" id="empty-conflicts"><p>IP 충돌이 감지되지 않았습니다.</p></div>
+    </div>
+
+    <!-- DHCP Panel -->
+    <div class="panel" id="panel-dhcp">
+      <div style="overflow-x:auto">
+      <table id="dhcp-table">
+        <thead>
+          <tr>
+            <th onclick="sortTable('dhcp-table',0)">서버 IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcp-table',1)">서버 MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcp-table',2)">벤더<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcp-table',3)">제공 IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcp-table',4)">서브넷<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcp-table',5)">게이트웨이<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcp-table',6)">DNS<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcp-table',7)">임대시간<span class="sort-arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="empty-state" id="empty-dhcp"><p>DHCP 서버가 감지되지 않았습니다.</p></div>
+    </div>
+
+    <!-- HSRP/VRRP Panel -->
+    <div class="panel" id="panel-protocols">
+      <h3 style="margin-bottom:12px">HSRP</h3>
+      <div style="overflow-x:auto">
+      <table id="hsrp-table">
+        <thead>
+          <tr>
+            <th onclick="sortTable('hsrp-table',0)">버전<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hsrp-table',1)">그룹<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hsrp-table',2)">상태<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hsrp-table',3)">우선순위<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hsrp-table',4)">가상 IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hsrp-table',5)">소스 IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hsrp-table',6)">Hello/Hold<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hsrp-table',7)">시간<span class="sort-arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="empty-state" id="empty-hsrp"><p>HSRP 패킷이 감지되지 않았습니다.</p></div>
+
+      <h3 style="margin:24px 0 12px">VRRP</h3>
+      <div style="overflow-x:auto">
+      <table id="vrrp-table">
+        <thead>
+          <tr>
+            <th onclick="sortTable('vrrp-table',0)">버전<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('vrrp-table',1)">라우터 ID<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('vrrp-table',2)">우선순위<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('vrrp-table',3)">가상 IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('vrrp-table',4)">소스 IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('vrrp-table',5)">광고 간격<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('vrrp-table',6)">시간<span class="sort-arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="empty-state" id="empty-vrrp"><p>VRRP 패킷이 감지되지 않았습니다.</p></div>
+    </div>
+
+    <!-- LLDP/CDP Panel -->
+    <div class="panel" id="panel-discovery">
+      <h3 style="margin-bottom:12px">LLDP 이웃</h3>
+      <div style="overflow-x:auto">
+      <table id="lldp-table">
+        <thead>
+          <tr>
+            <th onclick="sortTable('lldp-table',0)">Chassis ID<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('lldp-table',1)">Port ID<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('lldp-table',2)">시스템 이름<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('lldp-table',3)">시스템 설명<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('lldp-table',4)">관리 주소<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('lldp-table',5)">TTL<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('lldp-table',6)">시간<span class="sort-arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="empty-state" id="empty-lldp"><p>LLDP 이웃이 감지되지 않았습니다.</p></div>
+
+      <h3 style="margin:24px 0 12px">CDP 이웃</h3>
+      <div style="overflow-x:auto">
+      <table id="cdp-table">
+        <thead>
+          <tr>
+            <th onclick="sortTable('cdp-table',0)">장치 ID<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',1)">주소<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',2)">포트 ID<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',3)">플랫폼<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',4)">버전<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',5)">Native VLAN<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',6)">시간<span class="sort-arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="empty-state" id="empty-cdp"><p>CDP 이웃이 감지되지 않았습니다.</p></div>
+    </div>
+
+    <!-- Security Panel -->
+    <div class="panel" id="panel-security">
+      <h3 style="margin-bottom:12px">ARP 스푸핑 알림</h3>
+      <div style="overflow-x:auto">
+      <table id="arp-alert-table">
+        <thead>
+          <tr>
+            <th onclick="sortTable('arp-alert-table',0)">심각도<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',1)">유형<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',2)">IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',3)">메시지<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',4)">시간<span class="sort-arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="empty-state" id="empty-arp-alert"><p>ARP 스푸핑 알림이 없습니다.</p></div>
+
+      <h3 style="margin:24px 0 12px">DNS 스푸핑 알림</h3>
+      <div style="overflow-x:auto">
+      <table id="dns-alert-table">
+        <thead>
+          <tr>
+            <th onclick="sortTable('dns-alert-table',0)">심각도<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dns-alert-table',1)">유형<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dns-alert-table',2)">도메인<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dns-alert-table',3)">메시지<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dns-alert-table',4)">시간<span class="sort-arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="empty-state" id="empty-dns-alert"><p>DNS 스푸핑 알림이 없습니다.</p></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// State
+let currentTab = 'hosts';
+let pollTimer = null;
+const sortState = {};
+
+// Theme
+function initTheme() {
+  const saved = localStorage.getItem('theme');
+  if (saved === 'dark') {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    document.getElementById('themeSwitch').checked = true;
+  }
+}
+
+function toggleTheme() {
+  const isDark = document.getElementById('themeSwitch').checked;
+  if (isDark) {
+    document.documentElement.setAttribute('data-theme', 'dark');
+    localStorage.setItem('theme', 'dark');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+    localStorage.setItem('theme', 'light');
+  }
+}
+
+// Tabs
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.tab[data-tab="${tab}"]`).classList.add('active');
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-' + tab).classList.add('active');
+}
+
+// Scan controls
+async function startScan() {
+  try {
+    await fetch('/api/scan/start', { method: 'POST' });
+  } catch (e) { console.error(e); }
+}
+
+async function stopScan() {
+  try {
+    await fetch('/api/scan/stop', { method: 'POST' });
+  } catch (e) { console.error(e); }
+}
+
+// Data fetching
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  return r.json();
+}
+
+async function pollData() {
+  try {
+    const status = await fetchJSON('/api/status');
+    updateStatus(status);
+
+    const [hosts, conflicts, dhcp, hsrp, vrrp, lldp, cdp, arpAlerts, dnsAlerts] = await Promise.all([
+      fetchJSON('/api/hosts'),
+      fetchJSON('/api/conflicts'),
+      fetchJSON('/api/dhcp'),
+      fetchJSON('/api/hsrp'),
+      fetchJSON('/api/vrrp'),
+      fetchJSON('/api/lldp'),
+      fetchJSON('/api/cdp'),
+      fetchJSON('/api/security/arp'),
+      fetchJSON('/api/security/dns')
+    ]);
+
+    updateHostsTable(hosts);
+    updateConflictsTable(conflicts);
+    updateDHCPTable(dhcp);
+    updateHSRPTable(hsrp);
+    updateVRRPTable(vrrp);
+    updateLLDPTable(lldp);
+    updateCDPTable(cdp);
+    updateARPAlertTable(arpAlerts);
+    updateDNSAlertTable(dnsAlerts);
+    updateBadges(hosts, conflicts, dhcp, arpAlerts, dnsAlerts);
+  } catch (e) {
+    console.error('Poll error:', e);
+  }
+}
+
+function updateStatus(data) {
+  const badge = document.getElementById('statusBadge');
+  const bar = document.getElementById('progressBar');
+  const desc = document.getElementById('progressDesc');
+  const pct = document.getElementById('progressPercent');
+  const btnScan = document.getElementById('btnScan');
+  const btnStop = document.getElementById('btnStop');
+
+  badge.className = 'status-badge status-' + data.status;
+  const labels = { idle: '대기', running: '스캔 중', done: '완료' };
+  badge.textContent = labels[data.status] || data.status;
+
+  const p = data.progress || {};
+  bar.style.width = (p.percent || 0) + '%';
+  desc.textContent = p.description || '';
+  pct.textContent = (p.percent || 0) + '%';
+
+  btnScan.disabled = data.status === 'running';
+  btnStop.disabled = data.status !== 'running';
+}
+
+function updateBadges(hosts, conflicts, dhcp, arpAlerts, dnsAlerts) {
+  setBadge('badge-hosts', hosts.length);
+  setBadge('badge-conflicts', conflicts.filter(c => !c.isBond).length);
+  setBadge('badge-dhcp', dhcp.length);
+  const secCount = arpAlerts.length + dnsAlerts.length;
+  setBadge('badge-security', secCount);
+}
+
+function setBadge(id, count) {
+  const el = document.getElementById(id);
+  if (count > 0) {
+    el.textContent = count;
+    el.style.display = 'inline-block';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+// Table builders
+function updateHostsTable(hosts) {
+  const tbody = document.querySelector('#hosts-table tbody');
+  const empty = document.getElementById('empty-hosts');
+  if (!hosts || hosts.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = hosts.map((h, i) =>
+    `<tr>
+      <td>${i + 1}</td>
+      <td>${esc(h.ip)}</td>
+      <td>${esc(h.hostname || '-')}</td>
+      <td class="mac-cell">${esc(h.mac)}</td>
+      <td>${esc(h.vendor)}</td>
+      <td>${esc(h.subnet)}</td>
+    </tr>`
+  ).join('');
+}
+
+function updateConflictsTable(conflicts) {
+  const tbody = document.querySelector('#conflicts-table tbody');
+  const empty = document.getElementById('empty-conflicts');
+  if (!conflicts || conflicts.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = conflicts.map(c => {
+    const type = c.isBond
+      ? '<span class="text-cyan">Bond/Dual-NIC</span>'
+      : '<span class="text-danger">IP 충돌</span>';
+    return `<tr class="${c.isBond ? '' : 'severity-critical'}">
+      <td>${esc(c.ip)}</td>
+      <td>${type}</td>
+      <td class="mac-cell">${(c.macs || []).map(esc).join('<br>')}</td>
+      <td>${(c.vendors || []).map(esc).join('<br>')}</td>
+      <td>${esc(c.subnet)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function updateDHCPTable(servers) {
+  const tbody = document.querySelector('#dhcp-table tbody');
+  const empty = document.getElementById('empty-dhcp');
+  if (!servers || servers.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = servers.map(s =>
+    `<tr>
+      <td>${esc(s.serverIP)}</td>
+      <td class="mac-cell">${esc(s.serverMAC)}</td>
+      <td>${esc(s.vendor)}</td>
+      <td>${esc(s.offeredIP)}</td>
+      <td>${esc(s.subnetMask)}</td>
+      <td>${esc(s.router)}</td>
+      <td>${(s.dns || []).map(esc).join(', ')}</td>
+      <td>${formatLease(s.leaseTime)}</td>
+    </tr>`
+  ).join('');
+}
+
+function updateHSRPTable(entries) {
+  const tbody = document.querySelector('#hsrp-table tbody');
+  const empty = document.getElementById('empty-hsrp');
+  if (!entries || entries.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = entries.map(e =>
+    `<tr>
+      <td>v${e.version}</td>
+      <td>${e.group}</td>
+      <td>${esc(e.state)}</td>
+      <td>${e.priority}</td>
+      <td>${esc(e.virtualIP)}</td>
+      <td>${esc(e.sourceIP)}</td>
+      <td>${e.helloTime}s / ${e.holdTime}s</td>
+      <td>${esc(e.timestamp)}</td>
+    </tr>`
+  ).join('');
+}
+
+function updateVRRPTable(entries) {
+  const tbody = document.querySelector('#vrrp-table tbody');
+  const empty = document.getElementById('empty-vrrp');
+  if (!entries || entries.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = entries.map(e =>
+    `<tr>
+      <td>v${e.version}</td>
+      <td>${e.routerID}</td>
+      <td>${e.priority}</td>
+      <td>${(e.ipAddresses || []).map(esc).join(', ')}</td>
+      <td>${esc(e.sourceIP)}</td>
+      <td>${e.adverInt}s</td>
+      <td>${esc(e.timestamp)}</td>
+    </tr>`
+  ).join('');
+}
+
+function updateLLDPTable(entries) {
+  const tbody = document.querySelector('#lldp-table tbody');
+  const empty = document.getElementById('empty-lldp');
+  if (!entries || entries.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = entries.map(e =>
+    `<tr>
+      <td>${esc(e.chassisID)}</td>
+      <td>${esc(e.portID)}</td>
+      <td>${esc(e.sysName)}</td>
+      <td>${esc(e.sysDesc)}</td>
+      <td>${esc(e.mgmtAddr)}</td>
+      <td>${e.ttl}</td>
+      <td>${esc(e.timestamp)}</td>
+    </tr>`
+  ).join('');
+}
+
+function updateCDPTable(entries) {
+  const tbody = document.querySelector('#cdp-table tbody');
+  const empty = document.getElementById('empty-cdp');
+  if (!entries || entries.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = entries.map(e =>
+    `<tr>
+      <td>${esc(e.deviceID)}</td>
+      <td>${(e.addresses || []).map(esc).join(', ')}</td>
+      <td>${esc(e.portID)}</td>
+      <td>${esc(e.platform)}</td>
+      <td>${esc(e.version)}</td>
+      <td>${e.nativeVLAN || '-'}</td>
+      <td>${esc(e.timestamp)}</td>
+    </tr>`
+  ).join('');
+}
+
+function updateARPAlertTable(alerts) {
+  const tbody = document.querySelector('#arp-alert-table tbody');
+  const empty = document.getElementById('empty-arp-alert');
+  if (!alerts || alerts.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = alerts.map(a =>
+    `<tr class="severity-${a.severity}">
+      <td><span class="text-${a.severity === 'critical' ? 'danger' : 'warning'}">${a.severity.toUpperCase()}</span></td>
+      <td>${esc(a.alertType)}</td>
+      <td>${esc(a.ip)}</td>
+      <td>${esc(a.message)}</td>
+      <td>${esc(a.timestamp)}</td>
+    </tr>`
+  ).join('');
+}
+
+function updateDNSAlertTable(alerts) {
+  const tbody = document.querySelector('#dns-alert-table tbody');
+  const empty = document.getElementById('empty-dns-alert');
+  if (!alerts || alerts.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = alerts.map(a =>
+    `<tr class="severity-${a.severity}">
+      <td><span class="text-${a.severity === 'critical' ? 'danger' : 'warning'}">${a.severity.toUpperCase()}</span></td>
+      <td>${esc(a.alertType)}</td>
+      <td>${esc(a.domain)}</td>
+      <td>${esc(a.message)}</td>
+      <td>${esc(a.timestamp)}</td>
+    </tr>`
+  ).join('');
+}
+
+// Helpers
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function formatLease(seconds) {
+  if (!seconds) return '-';
+  if (seconds < 60) return seconds + '초';
+  if (seconds < 3600) return Math.floor(seconds / 60) + '분';
+  if (seconds < 86400) return Math.floor(seconds / 3600) + '시간 ' + Math.floor((seconds % 3600) / 60) + '분';
+  return Math.floor(seconds / 86400) + '일';
+}
+
+// Sort
+function sortTable(tableId, colIdx) {
+  const table = document.getElementById(tableId);
+  const tbody = table.querySelector('tbody');
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  if (rows.length === 0) return;
+
+  const key = tableId + '-' + colIdx;
+  const asc = sortState[key] !== 'asc';
+  sortState[key] = asc ? 'asc' : 'desc';
+
+  rows.sort((a, b) => {
+    let va = a.cells[colIdx]?.textContent.trim() || '';
+    let vb = b.cells[colIdx]?.textContent.trim() || '';
+
+    // Try numeric
+    const na = parseFloat(va), nb = parseFloat(vb);
+    if (!isNaN(na) && !isNaN(nb)) {
+      return asc ? na - nb : nb - na;
+    }
+
+    // Try IP sort
+    if (isIP(va) && isIP(vb)) {
+      return asc ? compareIP(va, vb) : compareIP(vb, va);
+    }
+
+    return asc ? va.localeCompare(vb) : vb.localeCompare(va);
+  });
+
+  rows.forEach(r => tbody.appendChild(r));
+
+  // Update arrows
+  table.querySelectorAll('th .sort-arrow').forEach(a => a.textContent = '');
+  const th = table.querySelectorAll('th')[colIdx];
+  if (th) {
+    const arrow = th.querySelector('.sort-arrow');
+    if (arrow) arrow.textContent = asc ? ' \u25B2' : ' \u25BC';
+  }
+}
+
+function isIP(s) { return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/.test(s); }
+
+function compareIP(a, b) {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 4; i++) {
+    if (pa[i] !== pb[i]) return pa[i] - pb[i];
+  }
+  return 0;
+}
+
+// Filter
+function filterTable(tableId, query) {
+  const table = document.getElementById(tableId);
+  const rows = table.querySelectorAll('tbody tr');
+  const q = query.toLowerCase();
+  rows.forEach(row => {
+    const text = row.textContent.toLowerCase();
+    row.style.display = text.includes(q) ? '' : 'none';
+  });
+}
+
+// Init
+initTheme();
+pollData();
+pollTimer = setInterval(pollData, 2000);
+</script>
+</body>
+</html>

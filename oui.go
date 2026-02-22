@@ -92,7 +92,8 @@ func LoadOUI() (*OUIDatabase, error) {
 	}
 
 	if err := db.loadIEEE(); err != nil {
-		fmt.Printf("  IEEE OUI 로드 실패: %v\n", err)
+		// IEEE OUI load failed, continue without it
+		_ = err
 	}
 
 	db.loadExtendedIEEE()
@@ -111,11 +112,9 @@ func (db *OUIDatabase) loadIEEE() error {
 		}
 	}
 
-	fmt.Println("  IEEE OUI 데이터베이스 다운로드 중...")
 	data, err := downloadOUI()
 	if err != nil {
 		if _, statErr := os.Stat(cachePath); statErr == nil {
-			fmt.Printf("  다운로드 실패, 캐시 사용: %v\n", err)
 			return db.parseIEEEFile(cachePath)
 		}
 		return err
@@ -144,15 +143,12 @@ func (db *OUIDatabase) loadExtendedIEEE() {
 		if info, err := os.Stat(cachePath); err == nil {
 			if time.Since(info.ModTime()) < ouiMaxAge {
 				if data, err := os.ReadFile(cachePath); err == nil {
-					before := len(db.Vendors)
 					db.parseIEEEData(data)
-					fmt.Printf("  %s 캐시 로드: %d개 추가\n", ext.name, len(db.Vendors)-before)
 					continue
 				}
 			}
 		}
 
-		fmt.Printf("  %s 다운로드 중...\n", ext.name)
 		req, err := http.NewRequest("GET", ext.url, nil)
 		if err != nil {
 			continue
@@ -161,12 +157,10 @@ func (db *OUIDatabase) loadExtendedIEEE() {
 
 		resp, err := client.Do(req)
 		if err != nil {
-			fmt.Printf("    실패: %v\n", err)
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
 			resp.Body.Close()
-			fmt.Printf("    실패: HTTP %d\n", resp.StatusCode)
 			continue
 		}
 		data, err := io.ReadAll(resp.Body)
@@ -178,9 +172,7 @@ func (db *OUIDatabase) loadExtendedIEEE() {
 		os.MkdirAll(cacheDir, 0755)
 		os.WriteFile(cachePath, data, 0644)
 
-		before := len(db.Vendors)
 		db.parseIEEEData(data)
-		fmt.Printf("  %s 로드: %d개 추가\n", ext.name, len(db.Vendors)-before)
 	}
 }
 
@@ -189,8 +181,6 @@ func downloadOUI() ([]byte, error) {
 
 	var lastErr error
 	for _, url := range ouiURLs {
-		fmt.Printf("    소스 시도: %s\n", url)
-
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
 			lastErr = err
@@ -313,7 +303,6 @@ func (db *OUIDatabase) loadCustomConfig() {
 		dir := filepath.Dir(path)
 		if mkErr := os.MkdirAll(dir, 0755); mkErr == nil {
 			os.WriteFile(path, []byte(defaultCustomOUI), 0644)
-			fmt.Printf("  커스텀 설정 파일 생성: %s\n", path)
 		}
 	}
 
@@ -322,7 +311,6 @@ func (db *OUIDatabase) loadCustomConfig() {
 		return
 	}
 
-	count := 0
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -347,18 +335,15 @@ func (db *OUIDatabase) loadCustomConfig() {
 		switch len(prefix) {
 		case 8:
 			db.Vendors[prefix] = vendor
-			count++
 		case 5:
 			var key [2]byte
 			_, err := fmt.Sscanf(prefix, "%02X:%02X", &key[0], &key[1])
 			if err == nil {
 				db.prefix2[key] = vendor
-				count++
 			}
 		}
 	}
 
-	fmt.Printf("  커스텀 OUI 로드: %d개 (%s)\n", count, customOUIPath())
 }
 
 func (db *OUIDatabase) loadAPICache() {

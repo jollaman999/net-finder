@@ -37,8 +37,6 @@ func DetectDHCP(iface *net.Interface, localMAC net.HardwareAddr, timeout time.Du
 		return nil, fmt.Errorf("DHCP Discover 전송 실패: %v", err)
 	}
 
-	fmt.Println("  DHCP Discover 전송 완료, 응답 대기 중...")
-
 	return listenDHCPOffers(handle, xid, timeout)
 }
 
