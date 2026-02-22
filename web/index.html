@@ -498,10 +498,12 @@ tr.subnet-header:hover { background: var(--primary-light); }
         <thead>
           <tr>
             <th onclick="sortTable('arp-alert-table',0)">심각도<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',1)">유형<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',2)">IP<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',3)">메시지<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',4)">시간<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',1)">대상 IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',2)">알려진 MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',3)">공격 MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',4)">패킷 수<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',5)">최초 감지<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',6)">마지막 감지<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -854,7 +856,8 @@ function renderCDPRow(e) {
   return `<tr><td>${esc(e.deviceID)}</td><td>${addrs.map(esc).join(', ')}</td><td class="mac-cell">${esc((e.sourceMAC||'').toUpperCase())}</td><td>${esc(e.portID)}</td><td>${esc(e.platform)}</td><td>${esc(e.version)}</td><td>${e.nativeVLAN||'-'}</td><td>${esc(e.timestamp)}</td></tr>`;
 }
 function renderARPAlertRow(a) {
-  return `<tr class="severity-${a.severity}"><td><span class="text-${a.severity==='critical'?'danger':'warning'}">${a.severity.toUpperCase()}</span></td><td>${esc(a.alertType)}</td><td>${esc(a.ip)}</td><td>${esc(a.message)}</td><td>${esc(a.timestamp)}</td></tr>`;
+  const sevClass = a.severity==='critical'?'danger':'warning';
+  return `<tr class="severity-${a.severity}"><td><span class="text-${sevClass}">${a.severity.toUpperCase()}</span></td><td>${esc(a.ip)}</td><td class="mac-cell">${esc(a.oldMAC)}</td><td class="mac-cell">${esc(a.newMAC)}</td><td><strong>${a.count||1}</strong></td><td>${esc(a.firstSeen||a.timestamp)}</td><td>${esc(a.timestamp)}</td></tr>`;
 }
 function renderDNSAlertRow(a) {
   return `<tr class="severity-${a.severity}"><td><span class="text-${a.severity==='critical'?'danger':'warning'}">${a.severity.toUpperCase()}</span></td><td>${esc(a.alertType)}</td><td>${esc(a.domain)}</td><td>${esc(a.message)}</td><td>${esc(a.timestamp)}</td></tr>`;

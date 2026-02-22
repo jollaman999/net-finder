@@ -113,6 +113,8 @@ type ARPSpoofAlert struct {
 	AlertType string `json:"alertType"`
 	Severity  string `json:"severity"`
 	Message   string `json:"message"`
+	Count     int    `json:"count"`
+	FirstSeen string `json:"firstSeen"`
 	Timestamp string `json:"timestamp"`
 }
 
@@ -801,12 +803,12 @@ func (s *Scanner) backgroundARPMonitor() {
 		return
 	}
 
-	// Build baseline IP->MAC mapping
-	baseline := make(map[string]string)
+	// Build baseline IP->MAC mapping (all known IPs, using all observed MACs)
+	baseline := make(map[string][]string)
 	s.arpResult.mu.Lock()
 	for ip, macs := range s.arpResult.Entries {
-		if len(macs) == 1 {
-			baseline[ip] = macs[0].String()
+		for _, m := range macs {
+			baseline[ip] = append(baseline[ip], m.String())
 		}
 	}
 	s.arpResult.mu.Unlock()
@@ -838,7 +840,22 @@ func (s *Scanner) backgroundARPMonitor() {
 		}
 		if len(alerts) > 0 {
 			s.state.mu.Lock()
-			s.state.ARPAlerts = append(s.state.ARPAlerts, alerts...)
+			for _, a := range alerts {
+				key := a.IP + ":" + a.NewMAC
+				merged := false
+				for i := range s.state.ARPAlerts {
+					eKey := s.state.ARPAlerts[i].IP + ":" + s.state.ARPAlerts[i].NewMAC
+					if eKey == key {
+						s.state.ARPAlerts[i].Count += a.Count
+						s.state.ARPAlerts[i].Timestamp = a.Timestamp
+						merged = true
+						break
+					}
+				}
+				if !merged {
+					s.state.ARPAlerts = append(s.state.ARPAlerts, a)
+				}
+			}
 			s.state.mu.Unlock()
 		}
 	}

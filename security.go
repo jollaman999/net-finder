@@ -14,7 +14,7 @@ import (
 )
 
 // MonitorARP monitors ARP traffic for spoofing indicators
-func MonitorARP(ifaceName string, baseline map[string]string, gatewayIP string, duration time.Duration, stopCh <-chan struct{}) ([]ARPSpoofAlert, error) {
+func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string, duration time.Duration, stopCh <-chan struct{}) ([]ARPSpoofAlert, error) {
 	handle, err := pcap.OpenLive(ifaceName, 65536, true, 500*time.Millisecond)
 	if err != nil {
 		return nil, fmt.Errorf("ARP 모니터 pcap 열기 실패: %v", err)
@@ -25,12 +25,10 @@ func MonitorARP(ifaceName string, baseline map[string]string, gatewayIP string, 
 		return nil, fmt.Errorf("ARP 모니터 BPF 필터 설정 실패: %v", err)
 	}
 
+	// key → alert index + packet count
+	alertIndex := make(map[string]int)
 	var alerts []ARPSpoofAlert
 	var mu sync.Mutex
-	alertSeen := make(map[string]bool)
-
-	// Track MAC changes for flapping detection
-	macHistory := make(map[string][]macChange)
 
 	deadline := time.Now().Add(duration)
 	src := gopacket.NewPacketSource(handle, handle.LinkType())
@@ -69,64 +67,39 @@ func MonitorARP(ifaceName string, baseline map[string]string, gatewayIP string, 
 
 		mu.Lock()
 
-		// Check for MAC change from baseline
-		if expectedMAC, ok := baseline[ipStr]; ok {
-			if expectedMAC != macStr {
-				key := "mac_change:" + ipStr + ":" + macStr
-				if !alertSeen[key] {
-					alertSeen[key] = true
+		// Check for unknown MAC (not in baseline)
+		if knownMACs, ok := baseline[ipStr]; ok {
+			found := false
+			for _, km := range knownMACs {
+				if km == macStr {
+					found = true
+					break
+				}
+			}
+			if !found {
+				key := ipStr + ":" + macStr
+				if idx, exists := alertIndex[key]; exists {
+					// Update existing alert
+					alerts[idx].Count++
+					alerts[idx].Timestamp = now.Format("2006-01-02 15:04:05")
+				} else {
 					severity := "warning"
 					if ipStr == gatewayIP {
 						severity = "critical"
 					}
+					alertIndex[key] = len(alerts)
 					alerts = append(alerts, ARPSpoofAlert{
 						IP:        ipStr,
-						OldMAC:    expectedMAC,
+						OldMAC:    strings.Join(knownMACs, ", "),
 						NewMAC:    macStr,
-						AlertType: "mac_change",
+						AlertType: "spoof",
 						Severity:  severity,
-						Message:   fmt.Sprintf("MAC 변경 감지: %s (%s → %s)", ipStr, expectedMAC, macStr),
+						Count:     1,
+						FirstSeen: now.Format("2006-01-02 15:04:05"),
 						Timestamp: now.Format("2006-01-02 15:04:05"),
 					})
 				}
-				// Update baseline
-				baseline[ipStr] = macStr
 			}
-		}
-
-		// Track MAC flapping (2+ distinct MACs in 30 seconds)
-		macHistory[ipStr] = append(macHistory[ipStr], macChange{mac: macStr, t: now})
-		// Clean old entries
-		var recent []macChange
-		for _, mc := range macHistory[ipStr] {
-			if now.Sub(mc.t) <= 30*time.Second {
-				recent = append(recent, mc)
-			}
-		}
-		macHistory[ipStr] = recent
-
-		// Count distinct MACs in window
-		distinctMACs := make(map[string]bool)
-		for _, mc := range recent {
-			distinctMACs[mc.mac] = true
-		}
-		if len(distinctMACs) >= 2 {
-			key := "flapping:" + ipStr
-			if !alertSeen[key] {
-				alertSeen[key] = true
-				severity := "warning"
-				if ipStr == gatewayIP {
-					severity = "critical"
-				}
-				alerts = append(alerts, ARPSpoofAlert{
-					IP:        ipStr,
-					AlertType: "flapping",
-					Severity:  severity,
-					Message:   fmt.Sprintf("MAC Flapping 감지: %s (30초 내 %d개 MAC 관측)", ipStr, len(distinctMACs)),
-					Timestamp: now.Format("2006-01-02 15:04:05"),
-				})
-			}
-			macHistory[ipStr] = nil
 		}
 
 		mu.Unlock()
