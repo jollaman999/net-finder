@@ -241,6 +241,31 @@ th {
 th:hover { background: var(--primary-light); }
 th .sort-arrow { margin-left: 4px; font-size: 10px; }
 tr:hover { background: var(--primary-light); }
+tr.subnet-header:hover { background: var(--primary-light); }
+.subnet-header {
+  background: var(--bg);
+  cursor: pointer;
+  user-select: none;
+}
+.subnet-header td {
+  font-weight: 600;
+  font-size: 13px;
+  padding: 10px 12px 6px;
+  border-bottom: 2px solid var(--primary);
+  color: var(--primary);
+}
+.subnet-header .subnet-count {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-left: 8px;
+}
+.collapse-arrow {
+  display: inline-block;
+  width: 14px;
+  font-size: 11px;
+  transition: transform 0.15s;
+}
 .text-danger { color: var(--danger); }
 .text-warning { color: var(--warning); }
 .text-success { color: var(--success); }
@@ -331,7 +356,6 @@ tr:hover { background: var(--primary-light); }
             <th onclick="sortTable('hosts-table',2)">호스트명<span class="sort-arrow"></span></th>
             <th onclick="sortTable('hosts-table',3)">MAC<span class="sort-arrow"></span></th>
             <th onclick="sortTable('hosts-table',4)">벤더<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('hosts-table',5)">서브넷<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -348,10 +372,9 @@ tr:hover { background: var(--primary-light); }
         <thead>
           <tr>
             <th onclick="sortTable('conflicts-table',0)">IP<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('conflicts-table',1)">유형<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('conflicts-table',1)">호스트명<span class="sort-arrow"></span></th>
             <th onclick="sortTable('conflicts-table',2)">MAC 주소<span class="sort-arrow"></span></th>
             <th onclick="sortTable('conflicts-table',3)">벤더<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('conflicts-table',4)">서브넷<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -505,12 +528,24 @@ tr:hover { background: var(--primary-light); }
 </div>
 
 <script>
-// State
+// ── State ──
 let currentTab = 'hosts';
 let pollTimer = null;
-const sortState = {};
 
-// Theme
+// Raw data (kept across polls so render can use sort/collapse state)
+let rawHosts = [];
+let rawConflicts = [];
+
+// Collapse state per table: Set of collapsed subnet strings
+const collapsed = { hosts: new Set(), conflicts: new Set() };
+
+// Sort state per table: { col, asc } or null
+const activeSort = {};
+
+// Search filter per table
+const activeFilter = {};
+
+// ── Theme ──
 function initTheme() {
   const saved = localStorage.getItem('theme');
   if (saved === 'dark') {
@@ -518,7 +553,6 @@ function initTheme() {
     document.getElementById('themeSwitch').checked = true;
   }
 }
-
 function toggleTheme() {
   const isDark = document.getElementById('themeSwitch').checked;
   if (isDark) {
@@ -530,7 +564,7 @@ function toggleTheme() {
   }
 }
 
-// Tabs
+// ── Tabs ──
 function switchTab(tab) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -539,24 +573,16 @@ function switchTab(tab) {
   document.getElementById('panel-' + tab).classList.add('active');
 }
 
-// Scan controls
+// ── Scan controls ──
 async function startScan() {
-  try {
-    await fetch('/api/scan/start', { method: 'POST' });
-  } catch (e) { console.error(e); }
+  try { await fetch('/api/scan/start', { method: 'POST' }); } catch(e) { console.error(e); }
 }
-
 async function stopScan() {
-  try {
-    await fetch('/api/scan/stop', { method: 'POST' });
-  } catch (e) { console.error(e); }
+  try { await fetch('/api/scan/stop', { method: 'POST' }); } catch(e) { console.error(e); }
 }
 
-// Data fetching
-async function fetchJSON(url) {
-  const r = await fetch(url);
-  return r.json();
-}
+// ── Polling ──
+async function fetchJSON(url) { const r = await fetch(url); return r.json(); }
 
 async function pollData() {
   try {
@@ -575,19 +601,19 @@ async function pollData() {
       fetchJSON('/api/security/dns')
     ]);
 
-    updateHostsTable(hosts);
-    updateConflictsTable(conflicts);
-    updateDHCPTable(dhcp);
-    updateHSRPTable(hsrp);
-    updateVRRPTable(vrrp);
-    updateLLDPTable(lldp);
-    updateCDPTable(cdp);
-    updateARPAlertTable(arpAlerts);
-    updateDNSAlertTable(dnsAlerts);
-    updateBadges(hosts, conflicts, dhcp, arpAlerts, dnsAlerts);
-  } catch (e) {
-    console.error('Poll error:', e);
-  }
+    rawHosts = hosts || [];
+    rawConflicts = conflicts || [];
+    renderHostsTable();
+    renderConflictsTable();
+    renderSimpleTable('dhcp-table', 'empty-dhcp', dhcp, renderDHCPRow);
+    renderSimpleTable('hsrp-table', 'empty-hsrp', hsrp, renderHSRPRow);
+    renderSimpleTable('vrrp-table', 'empty-vrrp', vrrp, renderVRRPRow);
+    renderSimpleTable('lldp-table', 'empty-lldp', lldp, renderLLDPRow);
+    renderSimpleTable('cdp-table', 'empty-cdp', cdp, renderCDPRow);
+    renderSimpleTable('arp-alert-table', 'empty-arp-alert', arpAlerts, renderARPAlertRow);
+    renderSimpleTable('dns-alert-table', 'empty-dns-alert', dnsAlerts, renderDNSAlertRow);
+    updateBadges(rawHosts, rawConflicts, dhcp, arpAlerts, dnsAlerts);
+  } catch(e) { console.error('Poll error:', e); }
 }
 
 function updateStatus(data) {
@@ -595,314 +621,297 @@ function updateStatus(data) {
   const bar = document.getElementById('progressBar');
   const desc = document.getElementById('progressDesc');
   const pct = document.getElementById('progressPercent');
-  const btnScan = document.getElementById('btnScan');
-  const btnStop = document.getElementById('btnStop');
-
   badge.className = 'status-badge status-' + data.status;
   const labels = { idle: '대기', running: '스캔 중', done: '완료' };
   badge.textContent = labels[data.status] || data.status;
-
   const p = data.progress || {};
   bar.style.width = (p.percent || 0) + '%';
   desc.textContent = p.description || '';
   pct.textContent = (p.percent || 0) + '%';
-
-  btnScan.disabled = data.status === 'running';
-  btnStop.disabled = data.status !== 'running';
+  document.getElementById('btnScan').disabled = data.status === 'running';
+  document.getElementById('btnStop').disabled = data.status !== 'running';
 }
 
 function updateBadges(hosts, conflicts, dhcp, arpAlerts, dnsAlerts) {
   setBadge('badge-hosts', hosts.length);
-  setBadge('badge-conflicts', conflicts.filter(c => !c.isBond).length);
+  setBadge('badge-conflicts', conflicts.length);
   setBadge('badge-dhcp', dhcp.length);
-  const secCount = arpAlerts.length + dnsAlerts.length;
-  setBadge('badge-security', secCount);
+  setBadge('badge-security', arpAlerts.length + dnsAlerts.length);
 }
-
 function setBadge(id, count) {
   const el = document.getElementById(id);
-  if (count > 0) {
-    el.textContent = count;
-    el.style.display = 'inline-block';
-  } else {
-    el.style.display = 'none';
-  }
+  if (count > 0) { el.textContent = count; el.style.display = 'inline-block'; }
+  else { el.style.display = 'none'; }
 }
 
-// Table builders
-function updateHostsTable(hosts) {
+// ── Grouping ──
+function groupBySubnet(items) {
+  const groups = {}, order = [];
+  items.forEach(item => {
+    const key = item.subnet || '(기타)';
+    if (!groups[key]) { groups[key] = []; order.push(key); }
+    groups[key].push(item);
+  });
+  order.sort((a, b) => {
+    const pa = a.split('/')[0] || '', pb = b.split('/')[0] || '';
+    if (isIP(pa) && isIP(pb)) return compareIP(pa, pb);
+    return a.localeCompare(b);
+  });
+  return { groups, order };
+}
+
+// ── Hosts table (grouped) ──
+const hostsFields = [null, 'ip', 'hostname', 'mac', 'vendor'];
+
+function renderHostsTable() {
   const tbody = document.querySelector('#hosts-table tbody');
   const empty = document.getElementById('empty-hosts');
-  if (!hosts || hosts.length === 0) {
-    tbody.innerHTML = '';
-    empty.style.display = '';
-    return;
-  }
+  if (rawHosts.length === 0) { tbody.innerHTML = ''; empty.style.display = ''; return; }
   empty.style.display = 'none';
-  tbody.innerHTML = hosts.map((h, i) =>
-    `<tr>
-      <td>${i + 1}</td>
-      <td>${esc(h.ip)}</td>
-      <td>${esc(h.hostname || '-')}</td>
-      <td class="mac-cell">${esc(h.mac)}</td>
-      <td>${esc(h.vendor)}</td>
-      <td>${esc(h.subnet)}</td>
-    </tr>`
-  ).join('');
+
+  const sort = activeSort['hosts-table'];
+  const filter = (activeFilter['hosts-table'] || '').toLowerCase();
+  const { groups, order } = groupBySubnet(rawHosts);
+  const cols = 5;
+  let html = '';
+  let idx = 0;
+
+  for (const subnet of order) {
+    let items = groups[subnet];
+    // Sort within group
+    if (sort && hostsFields[sort.col]) {
+      const field = hostsFields[sort.col];
+      items = [...items].sort((a, b) => fieldCompare(a[field] || '', b[field] || '', sort.asc));
+    } else {
+      items = [...items].sort((a, b) => compareIP(a.ip, b.ip));
+    }
+
+    // Filter
+    const filtered = filter
+      ? items.filter(h => `${h.ip} ${h.hostname||''} ${h.mac} ${h.vendor} ${(h.bondMACs||[]).join(' ')} ${(h.bondVendors||[]).join(' ')}`.toLowerCase().includes(filter))
+      : items;
+    if (filter && filtered.length === 0) continue;
+
+    const isCollapsed = collapsed.hosts.has(subnet);
+    const arrow = isCollapsed ? '\u25B6' : '\u25BC';
+    const shown = filter ? filtered.length : items.length;
+    html += `<tr class="subnet-header" onclick="toggleSubnet('hosts','${escAttr(subnet)}')"><td colspan="${cols}"><span class="collapse-arrow">${arrow}</span> ${esc(subnet)}<span class="subnet-count">${shown}개 호스트</span></td></tr>`;
+
+    if (!isCollapsed) {
+      for (const h of filtered) {
+        idx++;
+        let macCell, vendorCell;
+        if (h.isBond && h.bondMACs && h.bondMACs.length > 0) {
+          macCell = h.bondMACs.map(esc).join('<br>');
+          vendorCell = (h.bondVendors||[]).map(esc).join('<br>');
+        } else {
+          macCell = esc(h.mac);
+          vendorCell = esc(h.vendor);
+        }
+        const bondBadge = h.isBond ? ' <span class="text-cyan" style="font-size:11px;font-weight:600">[Multi-NIC/Bond]</span>' : '';
+        html += `<tr><td>${idx}</td><td>${esc(h.ip)}${bondBadge}</td><td>${esc(h.hostname||'-')}</td><td class="mac-cell">${macCell}</td><td>${vendorCell}</td></tr>`;
+      }
+    }
+  }
+  tbody.innerHTML = html;
+  updateSortArrows('hosts-table');
 }
 
-function updateConflictsTable(conflicts) {
+// ── Conflicts table (grouped) ──
+const conflictsFields = ['ip', 'hostname', 'macs', 'vendors'];
+
+function renderConflictsTable() {
   const tbody = document.querySelector('#conflicts-table tbody');
   const empty = document.getElementById('empty-conflicts');
-  if (!conflicts || conflicts.length === 0) {
-    tbody.innerHTML = '';
-    empty.style.display = '';
-    return;
-  }
+  if (rawConflicts.length === 0) { tbody.innerHTML = ''; empty.style.display = ''; return; }
   empty.style.display = 'none';
-  tbody.innerHTML = conflicts.map(c => {
-    const type = c.isBond
-      ? '<span class="text-cyan">Bond/Dual-NIC</span>'
-      : '<span class="text-danger">IP 충돌</span>';
-    return `<tr class="${c.isBond ? '' : 'severity-critical'}">
-      <td>${esc(c.ip)}</td>
-      <td>${type}</td>
-      <td class="mac-cell">${(c.macs || []).map(esc).join('<br>')}</td>
-      <td>${(c.vendors || []).map(esc).join('<br>')}</td>
-      <td>${esc(c.subnet)}</td>
-    </tr>`;
-  }).join('');
+
+  const sort = activeSort['conflicts-table'];
+  const filter = (activeFilter['conflicts-table'] || '').toLowerCase();
+  const { groups, order } = groupBySubnet(rawConflicts);
+  const cols = 4;
+  let html = '';
+
+  for (const subnet of order) {
+    let items = groups[subnet];
+    if (sort && conflictsFields[sort.col]) {
+      const field = conflictsFields[sort.col];
+      items = [...items].sort((a, b) => {
+        const va = Array.isArray(a[field]) ? a[field].join(' ') : (a[field]||'');
+        const vb = Array.isArray(b[field]) ? b[field].join(' ') : (b[field]||'');
+        return fieldCompare(va, vb, sort.asc);
+      });
+    } else {
+      items = [...items].sort((a, b) => compareIP(a.ip, b.ip));
+    }
+
+    const filtered = filter
+      ? items.filter(c => `${c.ip} ${c.hostname||''} ${(c.macs||[]).join(' ')} ${(c.vendors||[]).join(' ')}`.toLowerCase().includes(filter))
+      : items;
+    if (filter && filtered.length === 0) continue;
+
+    const isCollapsed = collapsed.conflicts.has(subnet);
+    const arrow = isCollapsed ? '\u25B6' : '\u25BC';
+    html += `<tr class="subnet-header" onclick="toggleSubnet('conflicts','${escAttr(subnet)}')"><td colspan="${cols}"><span class="collapse-arrow">${arrow}</span> ${esc(subnet)}<span class="subnet-count">${filtered.length}건</span></td></tr>`;
+
+    if (!isCollapsed) {
+      for (const c of filtered) {
+        html += `<tr class="severity-critical"><td>${esc(c.ip)}</td><td>${esc(c.hostname||'-')}</td><td class="mac-cell">${(c.macs||[]).map(esc).join('<br>')}</td><td>${(c.vendors||[]).map(esc).join('<br>')}</td></tr>`;
+      }
+    }
+  }
+  tbody.innerHTML = html;
+  updateSortArrows('conflicts-table');
 }
 
-function updateDHCPTable(servers) {
-  const tbody = document.querySelector('#dhcp-table tbody');
-  const empty = document.getElementById('empty-dhcp');
-  if (!servers || servers.length === 0) {
-    tbody.innerHTML = '';
-    empty.style.display = '';
-    return;
-  }
-  empty.style.display = 'none';
-  tbody.innerHTML = servers.map(s =>
-    `<tr>
-      <td>${esc(s.serverIP)}</td>
-      <td class="mac-cell">${esc(s.serverMAC)}</td>
-      <td>${esc(s.vendor)}</td>
-      <td>${esc(s.offeredIP)}</td>
-      <td>${esc(s.subnetMask)}</td>
-      <td>${esc(s.router)}</td>
-      <td>${(s.dns || []).map(esc).join(', ')}</td>
-      <td>${formatLease(s.leaseTime)}</td>
-    </tr>`
-  ).join('');
+// ── Toggle collapse ──
+function toggleSubnet(tableKey, subnet) {
+  const set = collapsed[tableKey];
+  if (set.has(subnet)) set.delete(subnet); else set.add(subnet);
+  if (tableKey === 'hosts') renderHostsTable();
+  else renderConflictsTable();
 }
 
-function updateHSRPTable(entries) {
-  const tbody = document.querySelector('#hsrp-table tbody');
-  const empty = document.getElementById('empty-hsrp');
-  if (!entries || entries.length === 0) {
-    tbody.innerHTML = '';
-    empty.style.display = '';
-    return;
-  }
+// ── Simple table renderer (non-grouped tables) ──
+function renderSimpleTable(tableId, emptyId, data, rowFn) {
+  const tbody = document.querySelector('#' + tableId + ' tbody');
+  const empty = document.getElementById(emptyId);
+  if (!data || data.length === 0) { tbody.innerHTML = ''; empty.style.display = ''; return; }
   empty.style.display = 'none';
-  tbody.innerHTML = entries.map(e =>
-    `<tr>
-      <td>v${e.version}</td>
-      <td>${e.group}</td>
-      <td>${esc(e.state)}</td>
-      <td>${e.priority}</td>
-      <td>${esc(e.virtualIP)}</td>
-      <td>${esc(e.sourceIP)}</td>
-      <td>${e.helloTime}s / ${e.holdTime}s</td>
-      <td>${esc(e.timestamp)}</td>
-    </tr>`
-  ).join('');
+
+  const sort = activeSort[tableId];
+  let rows = data;
+  if (sort) {
+    rows = [...data].sort((a, b) => {
+      const va = rowToText(rowFn(a), sort.col);
+      const vb = rowToText(rowFn(b), sort.col);
+      return fieldCompare(va, vb, sort.asc);
+    });
+  }
+  tbody.innerHTML = rows.map(rowFn).join('');
 }
 
-function updateVRRPTable(entries) {
-  const tbody = document.querySelector('#vrrp-table tbody');
-  const empty = document.getElementById('empty-vrrp');
-  if (!entries || entries.length === 0) {
-    tbody.innerHTML = '';
-    empty.style.display = '';
-    return;
-  }
-  empty.style.display = 'none';
-  tbody.innerHTML = entries.map(e =>
-    `<tr>
-      <td>v${e.version}</td>
-      <td>${e.routerID}</td>
-      <td>${e.priority}</td>
-      <td>${(e.ipAddresses || []).map(esc).join(', ')}</td>
-      <td>${esc(e.sourceIP)}</td>
-      <td>${e.adverInt}s</td>
-      <td>${esc(e.timestamp)}</td>
-    </tr>`
-  ).join('');
+function rowToText(html, colIdx) {
+  const tmp = document.createElement('tr');
+  tmp.innerHTML = html.replace(/^<tr[^>]*>/, '').replace(/<\/tr>$/, '');
+  return tmp.cells[colIdx]?.textContent.trim() || '';
 }
 
-function updateLLDPTable(entries) {
-  const tbody = document.querySelector('#lldp-table tbody');
-  const empty = document.getElementById('empty-lldp');
-  if (!entries || entries.length === 0) {
-    tbody.innerHTML = '';
-    empty.style.display = '';
-    return;
-  }
-  empty.style.display = 'none';
-  tbody.innerHTML = entries.map(e =>
-    `<tr>
-      <td>${esc(e.chassisID)}</td>
-      <td>${esc(e.portID)}</td>
-      <td>${esc(e.sysName)}</td>
-      <td>${esc(e.sysDesc)}</td>
-      <td>${esc(e.mgmtAddr)}</td>
-      <td>${e.ttl}</td>
-      <td>${esc(e.timestamp)}</td>
-    </tr>`
-  ).join('');
+// Row renderers
+function renderDHCPRow(s) {
+  return `<tr><td>${esc(s.serverIP)}</td><td class="mac-cell">${esc(s.serverMAC)}</td><td>${esc(s.vendor)}</td><td>${esc(s.offeredIP)}</td><td>${esc(s.subnetMask)}</td><td>${esc(s.router)}</td><td>${(s.dns||[]).map(esc).join(', ')}</td><td>${formatLease(s.leaseTime)}</td></tr>`;
+}
+function renderHSRPRow(e) {
+  return `<tr><td>v${e.version}</td><td>${e.group}</td><td>${esc(e.state)}</td><td>${e.priority}</td><td>${esc(e.virtualIP)}</td><td>${esc(e.sourceIP)}</td><td>${e.helloTime}s / ${e.holdTime}s</td><td>${esc(e.timestamp)}</td></tr>`;
+}
+function renderVRRPRow(e) {
+  return `<tr><td>v${e.version}</td><td>${e.routerID}</td><td>${e.priority}</td><td>${(e.ipAddresses||[]).map(esc).join(', ')}</td><td>${esc(e.sourceIP)}</td><td>${e.adverInt}s</td><td>${esc(e.timestamp)}</td></tr>`;
+}
+function renderLLDPRow(e) {
+  return `<tr><td>${esc(e.chassisID)}</td><td>${esc(e.portID)}</td><td>${esc(e.sysName)}</td><td>${esc(e.sysDesc)}</td><td>${esc(e.mgmtAddr)}</td><td>${e.ttl}</td><td>${esc(e.timestamp)}</td></tr>`;
+}
+function renderCDPRow(e) {
+  return `<tr><td>${esc(e.deviceID)}</td><td>${(e.addresses||[]).map(esc).join(', ')}</td><td>${esc(e.portID)}</td><td>${esc(e.platform)}</td><td>${esc(e.version)}</td><td>${e.nativeVLAN||'-'}</td><td>${esc(e.timestamp)}</td></tr>`;
+}
+function renderARPAlertRow(a) {
+  return `<tr class="severity-${a.severity}"><td><span class="text-${a.severity==='critical'?'danger':'warning'}">${a.severity.toUpperCase()}</span></td><td>${esc(a.alertType)}</td><td>${esc(a.ip)}</td><td>${esc(a.message)}</td><td>${esc(a.timestamp)}</td></tr>`;
+}
+function renderDNSAlertRow(a) {
+  return `<tr class="severity-${a.severity}"><td><span class="text-${a.severity==='critical'?'danger':'warning'}">${a.severity.toUpperCase()}</span></td><td>${esc(a.alertType)}</td><td>${esc(a.domain)}</td><td>${esc(a.message)}</td><td>${esc(a.timestamp)}</td></tr>`;
 }
 
-function updateCDPTable(entries) {
-  const tbody = document.querySelector('#cdp-table tbody');
-  const empty = document.getElementById('empty-cdp');
-  if (!entries || entries.length === 0) {
-    tbody.innerHTML = '';
-    empty.style.display = '';
-    return;
-  }
-  empty.style.display = 'none';
-  tbody.innerHTML = entries.map(e =>
-    `<tr>
-      <td>${esc(e.deviceID)}</td>
-      <td>${(e.addresses || []).map(esc).join(', ')}</td>
-      <td>${esc(e.portID)}</td>
-      <td>${esc(e.platform)}</td>
-      <td>${esc(e.version)}</td>
-      <td>${e.nativeVLAN || '-'}</td>
-      <td>${esc(e.timestamp)}</td>
-    </tr>`
-  ).join('');
-}
-
-function updateARPAlertTable(alerts) {
-  const tbody = document.querySelector('#arp-alert-table tbody');
-  const empty = document.getElementById('empty-arp-alert');
-  if (!alerts || alerts.length === 0) {
-    tbody.innerHTML = '';
-    empty.style.display = '';
-    return;
-  }
-  empty.style.display = 'none';
-  tbody.innerHTML = alerts.map(a =>
-    `<tr class="severity-${a.severity}">
-      <td><span class="text-${a.severity === 'critical' ? 'danger' : 'warning'}">${a.severity.toUpperCase()}</span></td>
-      <td>${esc(a.alertType)}</td>
-      <td>${esc(a.ip)}</td>
-      <td>${esc(a.message)}</td>
-      <td>${esc(a.timestamp)}</td>
-    </tr>`
-  ).join('');
-}
-
-function updateDNSAlertTable(alerts) {
-  const tbody = document.querySelector('#dns-alert-table tbody');
-  const empty = document.getElementById('empty-dns-alert');
-  if (!alerts || alerts.length === 0) {
-    tbody.innerHTML = '';
-    empty.style.display = '';
-    return;
-  }
-  empty.style.display = 'none';
-  tbody.innerHTML = alerts.map(a =>
-    `<tr class="severity-${a.severity}">
-      <td><span class="text-${a.severity === 'critical' ? 'danger' : 'warning'}">${a.severity.toUpperCase()}</span></td>
-      <td>${esc(a.alertType)}</td>
-      <td>${esc(a.domain)}</td>
-      <td>${esc(a.message)}</td>
-      <td>${esc(a.timestamp)}</td>
-    </tr>`
-  ).join('');
-}
-
-// Helpers
+// ── Helpers ──
 function esc(s) {
   if (!s) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-
+function escAttr(s) {
+  return esc(s).replace(/'/g,'&#39;');
+}
 function formatLease(seconds) {
   if (!seconds) return '-';
   if (seconds < 60) return seconds + '초';
-  if (seconds < 3600) return Math.floor(seconds / 60) + '분';
-  if (seconds < 86400) return Math.floor(seconds / 3600) + '시간 ' + Math.floor((seconds % 3600) / 60) + '분';
-  return Math.floor(seconds / 86400) + '일';
+  if (seconds < 3600) return Math.floor(seconds/60) + '분';
+  if (seconds < 86400) return Math.floor(seconds/3600) + '시간 ' + Math.floor((seconds%3600)/60) + '분';
+  return Math.floor(seconds/86400) + '일';
+}
+function isIP(s) { return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/.test(s); }
+function compareIP(a, b) {
+  const pa = (a||'0.0.0.0').split('.').map(Number);
+  const pb = (b||'0.0.0.0').split('.').map(Number);
+  for (let i = 0; i < 4; i++) { if (pa[i] !== pb[i]) return pa[i] - pb[i]; }
+  return 0;
+}
+function fieldCompare(va, vb, asc) {
+  if (isIP(va) && isIP(vb)) return asc ? compareIP(va, vb) : compareIP(vb, va);
+  const na = parseFloat(va), nb = parseFloat(vb);
+  if (!isNaN(na) && !isNaN(nb)) return asc ? na - nb : nb - na;
+  return asc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
 }
 
-// Sort
+// ── Sort ──
 function sortTable(tableId, colIdx) {
+  const prev = activeSort[tableId];
+  if (prev && prev.col === colIdx) {
+    if (prev.asc) {
+      // asc → clear sort (back to default grouping)
+      delete activeSort[tableId];
+    } else {
+      // desc → asc
+      activeSort[tableId] = { col: colIdx, asc: true };
+    }
+  } else {
+    // New column → start descending (visible change from default order)
+    activeSort[tableId] = { col: colIdx, asc: false };
+  }
+
+  // Re-render from data
+  if (tableId === 'hosts-table') { renderHostsTable(); return; }
+  if (tableId === 'conflicts-table') { renderConflictsTable(); return; }
+
+  // For simple tables: re-trigger from last poll data (let next poll handle it)
+  // But we can also sort DOM immediately for responsiveness
   const table = document.getElementById(tableId);
   const tbody = table.querySelector('tbody');
   const rows = Array.from(tbody.querySelectorAll('tr'));
   if (rows.length === 0) return;
-
-  const key = tableId + '-' + colIdx;
-  const asc = sortState[key] !== 'asc';
-  sortState[key] = asc ? 'asc' : 'desc';
-
+  const sort = activeSort[tableId];
   rows.sort((a, b) => {
-    let va = a.cells[colIdx]?.textContent.trim() || '';
-    let vb = b.cells[colIdx]?.textContent.trim() || '';
-
-    // Try numeric
-    const na = parseFloat(va), nb = parseFloat(vb);
-    if (!isNaN(na) && !isNaN(nb)) {
-      return asc ? na - nb : nb - na;
-    }
-
-    // Try IP sort
-    if (isIP(va) && isIP(vb)) {
-      return asc ? compareIP(va, vb) : compareIP(vb, va);
-    }
-
-    return asc ? va.localeCompare(vb) : vb.localeCompare(va);
+    const va = a.cells[sort.col]?.textContent.trim() || '';
+    const vb = b.cells[sort.col]?.textContent.trim() || '';
+    return fieldCompare(va, vb, sort.asc);
   });
-
   rows.forEach(r => tbody.appendChild(r));
+  updateSortArrows(tableId);
+}
 
-  // Update arrows
+function updateSortArrows(tableId) {
+  const table = document.getElementById(tableId);
   table.querySelectorAll('th .sort-arrow').forEach(a => a.textContent = '');
-  const th = table.querySelectorAll('th')[colIdx];
+  const sort = activeSort[tableId];
+  if (!sort) return;
+  const th = table.querySelectorAll('th')[sort.col];
   if (th) {
     const arrow = th.querySelector('.sort-arrow');
-    if (arrow) arrow.textContent = asc ? ' \u25B2' : ' \u25BC';
+    if (arrow) arrow.textContent = sort.asc ? ' \u25B2' : ' \u25BC';
   }
 }
 
-function isIP(s) { return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/.test(s); }
-
-function compareIP(a, b) {
-  const pa = a.split('.').map(Number);
-  const pb = b.split('.').map(Number);
-  for (let i = 0; i < 4; i++) {
-    if (pa[i] !== pb[i]) return pa[i] - pb[i];
-  }
-  return 0;
-}
-
-// Filter
+// ── Filter ──
 function filterTable(tableId, query) {
+  activeFilter[tableId] = query;
+  if (tableId === 'hosts-table') { renderHostsTable(); return; }
+  if (tableId === 'conflicts-table') { renderConflictsTable(); return; }
+  // DOM filter for simple tables
   const table = document.getElementById(tableId);
   const rows = table.querySelectorAll('tbody tr');
   const q = query.toLowerCase();
   rows.forEach(row => {
-    const text = row.textContent.toLowerCase();
-    row.style.display = text.includes(q) ? '' : 'none';
+    row.style.display = (!q || row.textContent.toLowerCase().includes(q)) ? '' : 'none';
   });
 }
 
-// Init
+// ── Init ──
 initTheme();
 pollData();
 pollTimer = setInterval(pollData, 2000);

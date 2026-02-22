@@ -18,20 +18,23 @@ type ProgressInfo struct {
 
 // HostEntry represents a discovered host
 type HostEntry struct {
-	IP       string `json:"ip"`
-	Hostname string `json:"hostname"`
-	MAC      string `json:"mac"`
-	Vendor   string `json:"vendor"`
-	Subnet   string `json:"subnet"`
+	IP          string   `json:"ip"`
+	Hostname    string   `json:"hostname"`
+	MAC         string   `json:"mac"`
+	Vendor      string   `json:"vendor"`
+	Subnet      string   `json:"subnet"`
+	IsBond      bool     `json:"isBond,omitempty"`
+	BondMACs    []string `json:"bondMACs,omitempty"`
+	BondVendors []string `json:"bondVendors,omitempty"`
 }
 
-// ConflictEntry represents an IP conflict or bond
+// ConflictEntry represents an IP conflict
 type ConflictEntry struct {
-	IP      string   `json:"ip"`
-	MACs    []string `json:"macs"`
-	Vendors []string `json:"vendors"`
-	Subnet  string   `json:"subnet"`
-	IsBond  bool     `json:"isBond"`
+	IP       string   `json:"ip"`
+	Hostname string   `json:"hostname"`
+	MACs     []string `json:"macs"`
+	Vendors  []string `json:"vendors"`
+	Subnet   string   `json:"subnet"`
 }
 
 // DHCPServerJSON is the JSON-friendly DHCP server info
@@ -550,6 +553,7 @@ func (s *Scanner) run() {
 }
 
 // processARPResults converts ARPResult into Hosts and Conflicts
+// All discovered IPs go into Hosts. Only real conflicts (not bonds) go into Conflicts.
 func (s *Scanner) processARPResults(result *ARPResult) {
 	result.mu.Lock()
 	defer result.mu.Unlock()
@@ -561,39 +565,50 @@ func (s *Scanner) processARPResults(result *ARPResult) {
 		ip := net.ParseIP(ipStr)
 		subnet := s.findSubnet(ip)
 
+		// First MAC for host entry
+		mac := macs[0]
+		vendor := "Unknown"
+		if s.oui != nil {
+			vendor = s.oui.Lookup(mac)
+		}
+
+		// Every IP goes into the host list
+		host := HostEntry{
+			IP:     ipStr,
+			MAC:    strings.ToUpper(mac.String()),
+			Vendor: vendor,
+			Subnet: subnet,
+		}
+
+		// Multiple MACs → check if bond or real conflict
 		if len(macs) > 1 {
 			devGroups := groupMACsByDevice(macs)
 			isBond := len(devGroups) == 1
 
 			var macStrs []string
 			var vendorStrs []string
-			for _, mac := range macs {
-				macStrs = append(macStrs, strings.ToUpper(mac.String()))
+			for _, m := range macs {
+				macStrs = append(macStrs, strings.ToUpper(m.String()))
 				if s.oui != nil {
-					vendorStrs = append(vendorStrs, s.oui.Lookup(mac))
+					vendorStrs = append(vendorStrs, s.oui.Lookup(m))
 				}
 			}
 
-			conflicts = append(conflicts, ConflictEntry{
-				IP:      ipStr,
-				MACs:    macStrs,
-				Vendors: vendorStrs,
-				Subnet:  subnet,
-				IsBond:  isBond,
-			})
-		} else {
-			mac := macs[0]
-			vendor := "Unknown"
-			if s.oui != nil {
-				vendor = s.oui.Lookup(mac)
+			if isBond {
+				host.IsBond = true
+				host.BondMACs = macStrs
+				host.BondVendors = vendorStrs
+			} else {
+				conflicts = append(conflicts, ConflictEntry{
+					IP:      ipStr,
+					MACs:    macStrs,
+					Vendors: vendorStrs,
+					Subnet:  subnet,
+				})
 			}
-			hosts = append(hosts, HostEntry{
-				IP:     ipStr,
-				MAC:    strings.ToUpper(mac.String()),
-				Vendor: vendor,
-				Subnet: subnet,
-			})
 		}
+
+		hosts = append(hosts, host)
 	}
 
 	// Sort hosts by IP
@@ -674,15 +689,20 @@ func (s *Scanner) resolveHostnames() {
 	}
 	s.hostnameMu.Unlock()
 
-	// Update hosts with hostnames
+	// Update hosts and conflicts with hostnames
 	s.state.mu.Lock()
+	s.hostnameMu.RLock()
 	for i := range s.state.Hosts {
-		s.hostnameMu.RLock()
 		if hn, ok := s.hostnameMap[s.state.Hosts[i].IP]; ok {
 			s.state.Hosts[i].Hostname = hn
 		}
-		s.hostnameMu.RUnlock()
 	}
+	for i := range s.state.Conflicts {
+		if hn, ok := s.hostnameMap[s.state.Conflicts[i].IP]; ok {
+			s.state.Conflicts[i].Hostname = hn
+		}
+	}
+	s.hostnameMu.RUnlock()
 	s.state.Hostnames = entries
 	s.state.mu.Unlock()
 }
