@@ -15,7 +15,7 @@ import (
 func main() {
 	ifaceName := flag.String("i", "", "네트워크 인터페이스 (미지정시 자동 감지)")
 	subnetStr := flag.String("s", "", "스캔할 서브넷 (콤마 구분, 예: 192.168.1.0/24,10.0.0.0/24)")
-	port := flag.Int("p", 8080, "웹 서버 포트")
+	port := flag.Int("p", 9090, "웹 서버 포트")
 	autoScan := flag.Bool("auto", true, "시작 시 자동 스캔")
 
 	flag.Usage = func() {
