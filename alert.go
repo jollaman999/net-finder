@@ -1,13 +1,19 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/smtp"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -33,23 +39,94 @@ type AlertManager struct {
 	mu       sync.RWMutex
 	configs  []AlertConfig
 	filePath string
+	encKey   [32]byte
 }
 
-// NewAlertManager creates a new AlertManager and loads saved configs from file
-func NewAlertManager(filePath string) *AlertManager {
-	am := &AlertManager{filePath: filePath}
+// alertConfigDir returns ~/.config/net-finder, creating it if needed
+func alertConfigDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("홈 디렉토리 확인 실패: %v", err)
+	}
+	dir := filepath.Join(home, ".config", "net-finder")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", fmt.Errorf("설정 디렉토리 생성 실패: %v", err)
+	}
+	return dir, nil
+}
+
+// deriveKey generates a deterministic AES-256 key from machine-id + fixed salt
+func deriveKey() [32]byte {
+	machineID, err := os.ReadFile("/etc/machine-id")
+	if err != nil {
+		// fallback: hostname
+		h, _ := os.Hostname()
+		machineID = []byte(h)
+	}
+	return sha256.Sum256(append([]byte("net-finder-alerts:"), machineID...))
+}
+
+// NewAlertManager creates a new AlertManager and loads saved configs
+func NewAlertManager() *AlertManager {
+	dir, err := alertConfigDir()
+	if err != nil {
+		log.Printf("알림 설정 경로 오류: %v", err)
+		dir = "."
+	}
+	am := &AlertManager{
+		filePath: filepath.Join(dir, "alerts.dat"),
+		encKey:   deriveKey(),
+	}
 	am.load()
 	return am
+}
+
+func (am *AlertManager) encrypt(plaintext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(am.encKey[:])
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, err
+	}
+	return gcm.Seal(nonce, nonce, plaintext, nil), nil
+}
+
+func (am *AlertManager) decrypt(ciphertext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(am.encKey[:])
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonceSize := gcm.NonceSize()
+	if len(ciphertext) < nonceSize {
+		return nil, fmt.Errorf("ciphertext too short")
+	}
+	nonce, data := ciphertext[:nonceSize], ciphertext[nonceSize:]
+	return gcm.Open(nil, nonce, data, nil)
 }
 
 func (am *AlertManager) load() {
 	data, err := os.ReadFile(am.filePath)
 	if err != nil {
-		return // file doesn't exist yet, start empty
+		return // file doesn't exist yet
+	}
+	plaintext, err := am.decrypt(data)
+	if err != nil {
+		log.Printf("알림 설정 복호화 실패: %v", err)
+		return
 	}
 	var configs []AlertConfig
-	if err := json.Unmarshal(data, &configs); err != nil {
-		log.Printf("알림 설정 파일 파싱 실패: %v", err)
+	if err := json.Unmarshal(plaintext, &configs); err != nil {
+		log.Printf("알림 설정 파싱 실패: %v", err)
 		return
 	}
 	am.configs = configs
@@ -57,12 +134,17 @@ func (am *AlertManager) load() {
 }
 
 func (am *AlertManager) save() {
-	data, err := json.MarshalIndent(am.configs, "", "  ")
+	plaintext, err := json.Marshal(am.configs)
 	if err != nil {
 		log.Printf("알림 설정 직렬화 실패: %v", err)
 		return
 	}
-	if err := os.WriteFile(am.filePath, data, 0600); err != nil {
+	ciphertext, err := am.encrypt(plaintext)
+	if err != nil {
+		log.Printf("알림 설정 암호화 실패: %v", err)
+		return
+	}
+	if err := os.WriteFile(am.filePath, ciphertext, 0600); err != nil {
 		log.Printf("알림 설정 파일 저장 실패: %v", err)
 	}
 }

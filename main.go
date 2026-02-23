@@ -84,7 +84,7 @@ func main() {
 	log.Printf("서브넷: %s", strings.Join(subnetStrs, ", "))
 
 	// Initialize alert manager and scanner
-	alertMgr := NewAlertManager("alerts.json")
+	alertMgr := NewAlertManager()
 	scanner := NewScanner(iface, localIP, localMAC, subnets)
 	scanner.alertMgr = alertMgr
 
