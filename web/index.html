@@ -230,6 +230,21 @@ header h1 span { color: var(--primary); }
   margin-bottom: 12px;
 }
 .search-box::placeholder { color: var(--text-secondary); }
+.subnet-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+.subnet-filter label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+}
 table {
   width: 100%;
   border-collapse: collapse;
@@ -362,6 +377,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
     <!-- Hosts Panel -->
     <div class="panel active" id="panel-hosts">
       <input type="text" class="search-box" data-i18n-placeholder="search_hosts" placeholder="Search (IP, hostname, MAC, vendor...)" oninput="filterTable('hosts-table', this.value)">
+      <div class="subnet-filter" id="subnet-filter-hosts"></div>
       <div style="overflow-x:auto">
       <table id="hosts-table">
         <thead>
@@ -382,6 +398,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
     <!-- Conflicts Panel -->
     <div class="panel" id="panel-conflicts">
       <input type="text" class="search-box" data-i18n-placeholder="search_generic" placeholder="Search..." oninput="filterTable('conflicts-table', this.value)">
+      <div class="subnet-filter" id="subnet-filter-conflicts"></div>
       <div style="overflow-x:auto">
       <table id="conflicts-table">
         <thead>
@@ -625,6 +642,7 @@ const i18n = {
     prog_scan_parallel: 'Parallel scanning (ARP, DHCP, HSRP/VRRP/LLDP/CDP)...',
     prog_scan_arp_done: 'ARP done ({0} hosts), resolving hostnames...',
     prog_scan_done: 'Scan complete',
+    select_all: 'All',
   },
   ko: {
     title: 'Net Finder',
@@ -702,6 +720,7 @@ const i18n = {
     prog_scan_parallel: '병렬 스캔 중 (ARP, DHCP, HSRP/VRRP/LLDP/CDP)...',
     prog_scan_arp_done: 'ARP 완료 ({0}개 호스트), 호스트명 해석 중...',
     prog_scan_done: '스캔 완료',
+    select_all: '전체',
   }
 };
 
@@ -737,6 +756,8 @@ function applyLanguage() {
   });
   // Re-render dynamic content
   if (rawHosts.length > 0 || rawConflicts.length > 0) {
+    renderSubnetFilter('hosts', knownSubnets.hosts);
+    renderSubnetFilter('conflicts', knownSubnets.conflicts);
     renderHostsTable();
     renderConflictsTable();
   }
@@ -767,6 +788,11 @@ let conflictMap = {};
 
 // Collapse state per table: Set of collapsed subnet strings
 const collapsed = { hosts: new Set(), conflicts: new Set() };
+
+// Subnet filter: Set of enabled (checked) subnets per panel
+const enabledSubnets = { hosts: new Set(), conflicts: new Set() };
+// Track known subnets to detect changes
+let knownSubnets = { hosts: [], conflicts: [] };
 
 // Sort state per table: { col, asc } or null
 const activeSort = {};
@@ -844,6 +870,14 @@ async function pollData() {
     conflictMap = {};
     rawConflicts.forEach(c => { conflictMap[c.ip] = c; });
 
+    // Update subnet filters
+    const hostsGrouped = groupBySubnet(rawHosts);
+    const conflictsGrouped = groupBySubnet(rawConflicts);
+    updateSubnetSets('hosts', hostsGrouped.order);
+    updateSubnetSets('conflicts', conflictsGrouped.order);
+    renderSubnetFilter('hosts', hostsGrouped.order);
+    renderSubnetFilter('conflicts', conflictsGrouped.order);
+
     renderHostsTable();
     renderConflictsTable();
     renderSimpleTable('dhcp-table', 'empty-dhcp', dhcp, renderDHCPRow);
@@ -912,6 +946,73 @@ function groupBySubnet(items) {
   return { groups, order };
 }
 
+// ── Subnet filter checkboxes ──
+function updateSubnetSets(panelKey, subnets) {
+  // Add newly discovered subnets (default: enabled)
+  for (const s of subnets) {
+    if (!enabledSubnets[panelKey].has(s) && !knownSubnets[panelKey].includes(s)) {
+      enabledSubnets[panelKey].add(s);
+    }
+  }
+  // On first load, enable all
+  if (knownSubnets[panelKey].length === 0 && subnets.length > 0) {
+    subnets.forEach(s => enabledSubnets[panelKey].add(s));
+  }
+  knownSubnets[panelKey] = subnets;
+}
+
+function renderSubnetFilter(panelKey, subnets) {
+  const container = document.getElementById('subnet-filter-' + panelKey);
+  if (!container) return;
+  if (subnets.length === 0) { container.innerHTML = ''; return; }
+
+  const enabled = enabledSubnets[panelKey];
+  const allChecked = subnets.every(s => enabled.has(s));
+  const noneChecked = subnets.every(s => !enabled.has(s));
+
+  let html = '<label><input type="checkbox" id="sf-all-' + panelKey + '"'
+    + (allChecked ? ' checked' : '')
+    + ' onchange="toggleAllSubnets(\'' + panelKey + '\', this.checked)">'
+    + ' ' + esc(t('select_all')) + '</label>';
+
+  for (const subnet of subnets) {
+    html += '<label><input type="checkbox" data-panel="' + panelKey + '" data-subnet="' + escAttr(subnet) + '"'
+      + (enabled.has(subnet) ? ' checked' : '')
+      + ' onchange="toggleSubnetFilter(\'' + panelKey + '\',\'' + escAttr(subnet) + '\', this.checked)">'
+      + ' ' + esc(subnet) + '</label>';
+  }
+  container.innerHTML = html;
+
+  // Set indeterminate state for "All" checkbox
+  const allCb = document.getElementById('sf-all-' + panelKey);
+  if (allCb) allCb.indeterminate = !allChecked && !noneChecked;
+}
+
+function toggleAllSubnets(panelKey, checked) {
+  const subnets = knownSubnets[panelKey];
+  enabledSubnets[panelKey].clear();
+  if (checked) subnets.forEach(s => enabledSubnets[panelKey].add(s));
+  renderSubnetFilter(panelKey, subnets);
+  if (panelKey === 'hosts') renderHostsTable();
+  else renderConflictsTable();
+}
+
+function toggleSubnetFilter(panelKey, subnet, checked) {
+  if (checked) enabledSubnets[panelKey].add(subnet);
+  else enabledSubnets[panelKey].delete(subnet);
+  // Update "All" checkbox state
+  const subnets = knownSubnets[panelKey];
+  const allCb = document.getElementById('sf-all-' + panelKey);
+  if (allCb) {
+    const allChecked = subnets.every(s => enabledSubnets[panelKey].has(s));
+    const noneChecked = subnets.every(s => !enabledSubnets[panelKey].has(s));
+    allCb.checked = allChecked;
+    allCb.indeterminate = !allChecked && !noneChecked;
+  }
+  if (panelKey === 'hosts') renderHostsTable();
+  else renderConflictsTable();
+}
+
 // ── Hosts table (grouped) ──
 const hostsFields = [null, 'ip', 'hostname', 'mac', 'vendor'];
 
@@ -929,6 +1030,7 @@ function renderHostsTable() {
   let idx = 0;
 
   for (const subnet of order) {
+    if (!enabledSubnets.hosts.has(subnet)) continue;
     let items = groups[subnet];
     // Sort within group
     if (sort && hostsFields[sort.col]) {
@@ -991,6 +1093,7 @@ function renderConflictsTable() {
   let html = '';
 
   for (const subnet of order) {
+    if (!enabledSubnets.conflicts.has(subnet)) continue;
     let items = groups[subnet];
     if (sort && conflictsFields[sort.col]) {
       const field = conflictsFields[sort.col];
