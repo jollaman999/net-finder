@@ -18,11 +18,12 @@ type AlertConfig struct {
 	Type     string   `json:"type"`     // "email"
 	SmtpHost string   `json:"smtpHost,omitempty"`
 	SmtpPort int      `json:"smtpPort,omitempty"`
-	SmtpUser string   `json:"smtpUser,omitempty"`
-	SmtpPass string   `json:"smtpPass,omitempty"`
+	SmtpFrom string   `json:"smtpFrom,omitempty"` // sender address (From)
 	SmtpTo   string   `json:"smtpTo,omitempty"`
 	SmtpSSL  bool     `json:"smtpSSL,omitempty"`
 	SmtpAuth bool     `json:"smtpAuth,omitempty"`
+	SmtpUser string   `json:"smtpUser,omitempty"` // auth credentials
+	SmtpPass string   `json:"smtpPass,omitempty"`
 }
 
 // AlertManager manages alert configurations and dispatches alerts
@@ -132,7 +133,7 @@ func sendEmail(cfg AlertConfig, conflict ConflictEntry) error {
 	}
 	addr := fmt.Sprintf("%s:%d", cfg.SmtpHost, port)
 
-	from := cfg.SmtpUser
+	from := cfg.SmtpFrom
 	if from == "" {
 		from = "netfinder@localhost"
 	}

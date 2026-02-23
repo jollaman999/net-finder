@@ -688,7 +688,9 @@ tr.subnet-header:hover { background: var(--primary-light); }
         <label class="form-label" data-i18n="alert_subnets">Subnets to monitor</label>
         <div class="subnet-select" id="alertSubnetList"></div>
       </div>
-      <div class="form-group"><label class="form-label" data-i18n="alert_smtp_host">SMTP Host</label><input class="form-input" id="alertSmtpHost"></div>
+      <div class="form-group"><label class="form-label" data-i18n="alert_smtp_from">From (Sender)</label><input class="form-input" id="alertSmtpFrom" placeholder="alert@example.com"></div>
+      <div class="form-group"><label class="form-label" data-i18n="alert_smtp_to">Recipient</label><input class="form-input" id="alertSmtpTo" placeholder="admin@example.com"></div>
+      <div class="form-group"><label class="form-label" data-i18n="alert_smtp_host">SMTP Host</label><input class="form-input" id="alertSmtpHost" placeholder="smtp.example.com"></div>
       <div class="form-group"><label class="form-label" data-i18n="alert_smtp_port">SMTP Port</label><input class="form-input" id="alertSmtpPort" type="number" value="465"></div>
       <div class="form-group">
         <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" id="alertSmtpSSL" checked onchange="onSSLChange()"> <span data-i18n="alert_smtp_ssl">SSL/TLS</span></label>
@@ -697,10 +699,9 @@ tr.subnet-header:hover { background: var(--primary-light); }
         <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" id="alertSmtpAuth" checked onchange="onAuthChange()"> <span data-i18n="alert_smtp_auth">Authentication</span></label>
       </div>
       <div id="alertFieldsAuth">
-        <div class="form-group"><label class="form-label" data-i18n="alert_smtp_user">Username</label><input class="form-input" id="alertSmtpUser"></div>
+        <div class="form-group"><label class="form-label" data-i18n="alert_smtp_user">Username</label><input class="form-input" id="alertSmtpUser" placeholder="user@example.com"></div>
         <div class="form-group"><label class="form-label" data-i18n="alert_smtp_pass">Password</label><input class="form-input" id="alertSmtpPass" type="password"></div>
       </div>
-      <div class="form-group"><label class="form-label" data-i18n="alert_smtp_to">Recipient</label><input class="form-input" id="alertSmtpTo"></div>
       <div id="alertMsg"></div>
     </div>
     <div class="modal-footer">
@@ -795,13 +796,14 @@ const i18n = {
     alert_title: 'Alert Settings',
     alert_subnets: 'Subnets to monitor',
     alert_subnets_all: 'All subnets',
+    alert_smtp_from: 'From (Sender)',
+    alert_smtp_to: 'Recipient',
     alert_smtp_host: 'SMTP Host',
     alert_smtp_port: 'SMTP Port',
     alert_smtp_ssl: 'SSL/TLS',
     alert_smtp_auth: 'Authentication',
     alert_smtp_user: 'Username',
     alert_smtp_pass: 'Password',
-    alert_smtp_to: 'Recipient',
     btn_test: 'Test',
     btn_save: 'Save',
     btn_delete: 'Delete',
@@ -891,13 +893,14 @@ const i18n = {
     alert_title: '알림 설정',
     alert_subnets: '감시 대역',
     alert_subnets_all: '전체 대역',
+    alert_smtp_from: '보낸 사람 주소',
+    alert_smtp_to: '수신자',
     alert_smtp_host: 'SMTP 호스트',
     alert_smtp_port: 'SMTP 포트',
     alert_smtp_ssl: 'SSL/TLS',
     alert_smtp_auth: '인증',
     alert_smtp_user: '사용자명',
     alert_smtp_pass: '비밀번호',
-    alert_smtp_to: '수신자',
     btn_test: '테스트',
     btn_save: '저장',
     btn_delete: '삭제',
@@ -1472,6 +1475,7 @@ function openAlertModal() {
   const modal = document.getElementById('alertModal');
   modal.style.display = '';
   // Reset form
+  document.getElementById('alertSmtpFrom').value = '';
   document.getElementById('alertSmtpHost').value = '';
   document.getElementById('alertSmtpPort').value = '465';
   document.getElementById('alertSmtpSSL').checked = true;
@@ -1543,11 +1547,12 @@ function getAlertFormData() {
   const cfg = {
     subnets: subnets,
     type: 'email',
+    smtpFrom: document.getElementById('alertSmtpFrom').value,
+    smtpTo: document.getElementById('alertSmtpTo').value,
     smtpHost: document.getElementById('alertSmtpHost').value,
-    smtpPort: parseInt(document.getElementById('alertSmtpPort').value) || 587,
+    smtpPort: parseInt(document.getElementById('alertSmtpPort').value) || 465,
     smtpSSL: document.getElementById('alertSmtpSSL').checked,
     smtpAuth: document.getElementById('alertSmtpAuth').checked,
-    smtpTo: document.getElementById('alertSmtpTo').value,
   };
   if (cfg.smtpAuth) {
     cfg.smtpUser = document.getElementById('alertSmtpUser').value;
@@ -1613,9 +1618,9 @@ function renderAlertList(configs) {
   let html = '';
   for (const c of configs) {
     const subnetsLabel = c.subnets && c.subnets.length > 0 ? c.subnets.join(', ') : t('alert_subnets_all');
-    const detail = c.smtpTo || '';
-    const flags = [c.smtpHost + ':' + (c.smtpPort||25), c.smtpSSL ? 'SSL' : 'STARTTLS', c.smtpAuth ? 'AUTH' : ''].filter(Boolean).join(' | ');
-    html += '<div class="alert-list-item"><div class="alert-info"><strong>EMAIL</strong> &mdash; ' + esc(detail) + '<br><span style="font-size:12px;color:var(--text-secondary)">' + esc(flags) + ' / ' + esc(subnetsLabel) + '</span></div>'
+    const fromTo = (c.smtpFrom || '?') + ' &rarr; ' + (c.smtpTo || '?');
+    const flags = [c.smtpHost + ':' + (c.smtpPort||465), c.smtpSSL ? 'SSL' : 'STARTTLS', c.smtpAuth ? 'AUTH' : ''].filter(Boolean).join(' | ');
+    html += '<div class="alert-list-item"><div class="alert-info"><strong>EMAIL</strong> &mdash; ' + fromTo + '<br><span style="font-size:12px;color:var(--text-secondary)">' + esc(flags) + ' / ' + esc(subnetsLabel) + '</span></div>'
       + '<button class="btn-sm btn-danger" onclick="deleteAlert(\'' + escAttr(c.id) + '\')" data-i18n="btn_delete">' + esc(t('btn_delete')) + '</button></div>';
   }
   container.innerHTML = html;
