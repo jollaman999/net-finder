@@ -443,108 +443,103 @@ func (s *Scanner) run() {
 		return
 	}
 
-	// Phase 2: ARP Scan (10-50%)
-	s.setProgress("arp", "ARP 스캔 중...", 10)
-	result, err := ARPScan(s.iface, s.localIP, s.localMAC, s.subnets, 3*time.Second)
-	if err != nil {
-		log.Printf("ARP 스캔 실패: %v", err)
-		s.setProgress("arp", fmt.Sprintf("ARP 스캔 실패: %v", err), 50)
-	} else {
+	// All phases run in parallel after OUI load
+	s.setProgress("scan", "병렬 스캔 중 (ARP, DHCP, HSRP/VRRP/LLDP/CDP)...", 10)
+
+	var scanWg sync.WaitGroup
+
+	// ── ARP Scan → Hostname Resolution (parallel branch 1) ──
+	scanWg.Add(1)
+	go func() {
+		defer scanWg.Done()
+		result, err := ARPScan(s.iface, s.localIP, s.localMAC, s.subnets, 3*time.Second)
+		if err != nil {
+			log.Printf("ARP 스캔 실패: %v", err)
+			return
+		}
 		s.arpResult = result
 		s.processARPResults(result)
-		s.setProgress("arp", fmt.Sprintf("ARP 스캔 완료 (%d개 호스트)", len(s.GetHosts())), 50)
-	}
-	if s.stopped() {
-		return
-	}
+		s.setProgress("scan", fmt.Sprintf("ARP 완료 (%d개 호스트), 호스트명 해석 중...", len(s.GetHosts())), 30)
 
-	// Phase 3: DHCP Detection (50-60%)
-	s.setProgress("dhcp", "DHCP 서버 감지 중...", 50)
-	servers, err := DetectDHCP(s.iface, s.localMAC, 5*time.Second)
-	if err != nil {
-		log.Printf("DHCP 감지 실패: %v", err)
-	} else {
+		if s.stopped() {
+			return
+		}
+		// Hostname resolution immediately after ARP
+		s.resolveHostnames()
+	}()
+
+	// ── DHCP Detection → DNS Spoofing Check (parallel branch 2) ──
+	scanWg.Add(1)
+	go func() {
+		defer scanWg.Done()
+		servers, err := DetectDHCP(s.iface, s.localMAC, 5*time.Second)
+		if err != nil {
+			log.Printf("DHCP 감지 실패: %v", err)
+			return
+		}
 		s.processDHCPResults(servers)
-	}
-	s.setProgress("dhcp", "DHCP 감지 완료", 60)
+
+		if s.stopped() {
+			return
+		}
+		// DNS spoofing check immediately after DHCP
+		s.checkDNSSpoofing()
+	}()
+
+	// ── Protocol Listeners: HSRP/VRRP/LLDP/CDP (parallel branch 3) ──
+	scanWg.Add(4)
+	go func() {
+		defer scanWg.Done()
+		entries, err := ListenHSRP(s.iface.Name, 30*time.Second, s.stopCh)
+		if err != nil {
+			log.Printf("HSRP 리스너 오류: %v", err)
+			return
+		}
+		s.state.mu.Lock()
+		s.state.HSRPEntries = append(s.state.HSRPEntries, entries...)
+		s.state.mu.Unlock()
+	}()
+	go func() {
+		defer scanWg.Done()
+		entries, err := ListenVRRP(s.iface.Name, 30*time.Second, s.stopCh)
+		if err != nil {
+			log.Printf("VRRP 리스너 오류: %v", err)
+			return
+		}
+		s.state.mu.Lock()
+		s.state.VRRPEntries = append(s.state.VRRPEntries, entries...)
+		s.state.mu.Unlock()
+	}()
+	go func() {
+		defer scanWg.Done()
+		entries, err := ListenLLDP(s.iface.Name, 30*time.Second, s.stopCh)
+		if err != nil {
+			log.Printf("LLDP 리스너 오류: %v", err)
+			return
+		}
+		s.state.mu.Lock()
+		s.state.LLDPNeighbors = append(s.state.LLDPNeighbors, entries...)
+		s.state.mu.Unlock()
+	}()
+	go func() {
+		defer scanWg.Done()
+		entries, err := ListenCDP(s.iface.Name, 30*time.Second, s.stopCh)
+		if err != nil {
+			log.Printf("CDP 리스너 오류: %v", err)
+			return
+		}
+		s.state.mu.Lock()
+		s.state.CDPNeighbors = append(s.state.CDPNeighbors, entries...)
+		s.state.mu.Unlock()
+	}()
+
+	scanWg.Wait()
+
 	if s.stopped() {
 		return
 	}
 
-	// Phase 4: Protocol listeners (60-80%)
-	s.setProgress("protocols", "HSRP/VRRP/LLDP/CDP 수집 중 (30초)...", 60)
-	{
-		var wg sync.WaitGroup
-		wg.Add(4)
-
-		go func() {
-			defer wg.Done()
-			entries, err := ListenHSRP(s.iface.Name, 30*time.Second, s.stopCh)
-			if err != nil {
-				log.Printf("HSRP 리스너 오류: %v", err)
-				return
-			}
-			s.state.mu.Lock()
-			s.state.HSRPEntries = append(s.state.HSRPEntries, entries...)
-			s.state.mu.Unlock()
-		}()
-
-		go func() {
-			defer wg.Done()
-			entries, err := ListenVRRP(s.iface.Name, 30*time.Second, s.stopCh)
-			if err != nil {
-				log.Printf("VRRP 리스너 오류: %v", err)
-				return
-			}
-			s.state.mu.Lock()
-			s.state.VRRPEntries = append(s.state.VRRPEntries, entries...)
-			s.state.mu.Unlock()
-		}()
-
-		go func() {
-			defer wg.Done()
-			entries, err := ListenLLDP(s.iface.Name, 30*time.Second, s.stopCh)
-			if err != nil {
-				log.Printf("LLDP 리스너 오류: %v", err)
-				return
-			}
-			s.state.mu.Lock()
-			s.state.LLDPNeighbors = append(s.state.LLDPNeighbors, entries...)
-			s.state.mu.Unlock()
-		}()
-
-		go func() {
-			defer wg.Done()
-			entries, err := ListenCDP(s.iface.Name, 30*time.Second, s.stopCh)
-			if err != nil {
-				log.Printf("CDP 리스너 오류: %v", err)
-				return
-			}
-			s.state.mu.Lock()
-			s.state.CDPNeighbors = append(s.state.CDPNeighbors, entries...)
-			s.state.mu.Unlock()
-		}()
-
-		wg.Wait()
-	}
-	s.setProgress("protocols", "프로토콜 수집 완료", 80)
-	if s.stopped() {
-		return
-	}
-
-	// Phase 5: Hostname resolution (80-90%)
-	s.setProgress("hostname", "호스트명 해석 중...", 80)
-	s.resolveHostnames()
-	s.setProgress("hostname", "호스트명 해석 완료", 90)
-	if s.stopped() {
-		return
-	}
-
-	// Phase 6: Security checks (90-100%)
-	s.setProgress("security", "보안 검증 중...", 90)
-	s.checkDNSSpoofing()
-	s.setProgress("security", "보안 검증 완료", 100)
-
+	s.setProgress("done", "스캔 완료", 100)
 	s.state.mu.Lock()
 	s.state.Status = "done"
 	s.state.mu.Unlock()
