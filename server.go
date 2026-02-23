@@ -12,7 +12,7 @@ import (
 //go:embed web/index.html
 var webFS embed.FS
 
-func startWebServer(port int, scanner *Scanner, currentIface string) error {
+func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentIface string) error {
 	mux := http.NewServeMux()
 
 	// Serve SPA
@@ -139,6 +139,51 @@ func startWebServer(port int, scanner *Scanner, currentIface string) error {
 			return
 		}
 		writeJSON(w, GetInterfaces(currentIface))
+	})
+
+	mux.HandleFunc("/api/alerts", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, alertMgr.GetConfigs())
+		case http.MethodPost:
+			var cfg AlertConfig
+			if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+				http.Error(w, "Invalid JSON", http.StatusBadRequest)
+				return
+			}
+			alertMgr.AddConfig(cfg)
+			writeJSON(w, map[string]string{"status": "ok"})
+		case http.MethodDelete:
+			id := r.URL.Query().Get("id")
+			if id == "" {
+				http.Error(w, "id required", http.StatusBadRequest)
+				return
+			}
+			if alertMgr.DeleteConfig(id) {
+				writeJSON(w, map[string]string{"status": "ok"})
+			} else {
+				http.Error(w, "not found", http.StatusNotFound)
+			}
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	mux.HandleFunc("/api/alerts/test", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var cfg AlertConfig
+		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		if err := alertMgr.TestAlert(cfg); err != nil {
+			writeJSON(w, map[string]interface{}{"status": "error", "message": err.Error()})
+			return
+		}
+		writeJSON(w, map[string]string{"status": "ok"})
 	})
 
 	server := &http.Server{

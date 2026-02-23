@@ -325,6 +325,116 @@ tr.subnet-header:hover { background: var(--primary-light); }
 .info-card h4 { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
 .info-card .value { font-size: 16px; font-weight: 600; }
 .mac-cell { font-family: 'Courier New', monospace; font-size: 12px; }
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal {
+  background: var(--surface);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  max-width: 520px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-header h3 { font-size: 16px; font-weight: 600; }
+.modal-header button {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  padding: 0 4px;
+}
+.modal-header button:hover { color: var(--text); }
+.modal-body { padding: 20px; }
+.modal-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.form-group { margin-bottom: 14px; }
+.form-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: var(--text-secondary);
+}
+.form-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+}
+.form-input:focus { outline: none; border-color: var(--primary); }
+.subnet-select {
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  background: var(--bg);
+}
+.subnet-select label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.alert-list {
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--border);
+}
+.alert-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.alert-list-item .alert-info { flex: 1; }
+.alert-list-item .alert-info strong { color: var(--primary); }
+.btn-sm {
+  padding: 3px 10px;
+  font-size: 12px;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.btn-sm:hover { opacity: 0.85; }
+.alert-msg {
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  margin-top: 8px;
+}
+.alert-msg-ok { background: var(--success-light); color: var(--success); }
+.alert-msg-err { background: var(--danger-light); color: var(--danger); }
 @media (max-width: 768px) {
   .container { padding: 8px; }
   header { padding: 8px 12px; flex-wrap: wrap; gap: 8px; }
@@ -397,7 +507,10 @@ tr.subnet-header:hover { background: var(--primary-light); }
 
     <!-- Conflicts Panel -->
     <div class="panel" id="panel-conflicts">
-      <input type="text" class="search-box" data-i18n-placeholder="search_generic" placeholder="Search..." oninput="filterTable('conflicts-table', this.value)">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <input type="text" class="search-box" style="margin-bottom:0" data-i18n-placeholder="search_generic" placeholder="Search..." oninput="filterTable('conflicts-table', this.value)">
+        <button class="btn btn-primary" onclick="openAlertModal()" data-i18n="btn_alert_config">Alert Settings</button>
+      </div>
       <div class="subnet-filter" id="subnet-filter-conflicts"></div>
       <div style="overflow-x:auto">
       <table id="conflicts-table">
@@ -563,6 +676,41 @@ tr.subnet-header:hover { background: var(--primary-light); }
   </div>
 </div>
 
+<!-- Alert Settings Modal -->
+<div class="modal-overlay" id="alertModal" style="display:none" onclick="closeAlertModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 data-i18n="alert_title">Alert Settings</h3>
+      <button onclick="closeAlertModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label" data-i18n="alert_subnets">Subnets to monitor</label>
+        <div class="subnet-select" id="alertSubnetList"></div>
+      </div>
+      <div class="form-group"><label class="form-label" data-i18n="alert_smtp_host">SMTP Host</label><input class="form-input" id="alertSmtpHost"></div>
+      <div class="form-group"><label class="form-label" data-i18n="alert_smtp_port">SMTP Port</label><input class="form-input" id="alertSmtpPort" type="number" value="465"></div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" id="alertSmtpSSL" checked onchange="onSSLChange()"> <span data-i18n="alert_smtp_ssl">SSL/TLS</span></label>
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer"><input type="checkbox" id="alertSmtpAuth" checked onchange="onAuthChange()"> <span data-i18n="alert_smtp_auth">Authentication</span></label>
+      </div>
+      <div id="alertFieldsAuth">
+        <div class="form-group"><label class="form-label" data-i18n="alert_smtp_user">Username</label><input class="form-input" id="alertSmtpUser"></div>
+        <div class="form-group"><label class="form-label" data-i18n="alert_smtp_pass">Password</label><input class="form-input" id="alertSmtpPass" type="password"></div>
+      </div>
+      <div class="form-group"><label class="form-label" data-i18n="alert_smtp_to">Recipient</label><input class="form-input" id="alertSmtpTo"></div>
+      <div id="alertMsg"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="testAlert()" data-i18n="btn_test">Test</button>
+      <button class="btn btn-primary" onclick="saveAlert()" data-i18n="btn_save">Save</button>
+    </div>
+    <div class="alert-list" id="alertList"></div>
+  </div>
+</div>
+
 <script>
 // ── i18n ──
 const i18n = {
@@ -643,6 +791,24 @@ const i18n = {
     prog_scan_arp_done: 'ARP done ({0} hosts), resolving hostnames...',
     prog_scan_done: 'Scan complete',
     select_all: 'All',
+    btn_alert_config: 'Alert Settings',
+    alert_title: 'Alert Settings',
+    alert_subnets: 'Subnets to monitor',
+    alert_subnets_all: 'All subnets',
+    alert_smtp_host: 'SMTP Host',
+    alert_smtp_port: 'SMTP Port',
+    alert_smtp_ssl: 'SSL/TLS',
+    alert_smtp_auth: 'Authentication',
+    alert_smtp_user: 'Username',
+    alert_smtp_pass: 'Password',
+    alert_smtp_to: 'Recipient',
+    btn_test: 'Test',
+    btn_save: 'Save',
+    btn_delete: 'Delete',
+    alert_test_ok: 'Test alert sent successfully',
+    alert_test_fail: 'Test failed: {0}',
+    alert_saved: 'Alert saved',
+    alert_no_configs: 'No alert rules configured.',
   },
   ko: {
     title: 'Net Finder',
@@ -721,6 +887,24 @@ const i18n = {
     prog_scan_arp_done: 'ARP 완료 ({0}개 호스트), 호스트명 해석 중...',
     prog_scan_done: '스캔 완료',
     select_all: '전체',
+    btn_alert_config: '알림 설정',
+    alert_title: '알림 설정',
+    alert_subnets: '감시 대역',
+    alert_subnets_all: '전체 대역',
+    alert_smtp_host: 'SMTP 호스트',
+    alert_smtp_port: 'SMTP 포트',
+    alert_smtp_ssl: 'SSL/TLS',
+    alert_smtp_auth: '인증',
+    alert_smtp_user: '사용자명',
+    alert_smtp_pass: '비밀번호',
+    alert_smtp_to: '수신자',
+    btn_test: '테스트',
+    btn_save: '저장',
+    btn_delete: '삭제',
+    alert_test_ok: '테스트 알림 발송 성공',
+    alert_test_fail: '테스트 실패: {0}',
+    alert_saved: '알림 저장 완료',
+    alert_no_configs: '설정된 알림 규칙이 없습니다.',
   }
 };
 
@@ -1281,6 +1465,160 @@ function filterTable(tableId, query) {
   rows.forEach(row => {
     row.style.display = (!q || row.textContent.toLowerCase().includes(q)) ? '' : 'none';
   });
+}
+
+// ── Alert Modal ──
+function openAlertModal() {
+  const modal = document.getElementById('alertModal');
+  modal.style.display = '';
+  // Reset form
+  document.getElementById('alertSmtpHost').value = '';
+  document.getElementById('alertSmtpPort').value = '465';
+  document.getElementById('alertSmtpSSL').checked = true;
+  document.getElementById('alertSmtpAuth').checked = true;
+  document.getElementById('alertFieldsAuth').style.display = '';
+  document.getElementById('alertSmtpUser').value = '';
+  document.getElementById('alertSmtpPass').value = '';
+  document.getElementById('alertSmtpTo').value = '';
+  document.getElementById('alertMsg').innerHTML = '';
+  // Populate subnets from conflicts data
+  const container = document.getElementById('alertSubnetList');
+  const subnets = knownSubnets.conflicts.length > 0 ? knownSubnets.conflicts : knownSubnets.hosts;
+  let html = '<label><input type="checkbox" id="alertSubnetAll" checked onchange="toggleAlertSubnetsAll(this.checked)"> ' + esc(t('alert_subnets_all')) + '</label>';
+  for (const s of subnets) {
+    html += '<label><input type="checkbox" class="alert-subnet-cb" value="' + escAttr(s) + '" checked onchange="updateAlertSubnetAll()"> ' + esc(s) + '</label>';
+  }
+  container.innerHTML = html;
+  // Load saved configs
+  loadAlertConfigs();
+}
+
+function closeAlertModal(event) {
+  if (event && event.target !== document.getElementById('alertModal')) return;
+  document.getElementById('alertModal').style.display = 'none';
+}
+
+function onSSLChange() {
+  const ssl = document.getElementById('alertSmtpSSL').checked;
+  const portEl = document.getElementById('alertSmtpPort');
+  if (ssl && portEl.value === '587') portEl.value = '465';
+  else if (!ssl && portEl.value === '465') portEl.value = '587';
+}
+
+function onAuthChange() {
+  document.getElementById('alertFieldsAuth').style.display = document.getElementById('alertSmtpAuth').checked ? '' : 'none';
+}
+
+function toggleAlertSubnetsAll(checked) {
+  document.querySelectorAll('.alert-subnet-cb').forEach(cb => cb.checked = checked);
+  const allCb = document.getElementById('alertSubnetAll');
+  if (allCb) { allCb.checked = checked; allCb.indeterminate = false; }
+}
+
+function updateAlertSubnetAll() {
+  const cbs = document.querySelectorAll('.alert-subnet-cb');
+  const allCb = document.getElementById('alertSubnetAll');
+  if (!allCb || cbs.length === 0) return;
+  const checkedCount = document.querySelectorAll('.alert-subnet-cb:checked').length;
+  if (checkedCount === cbs.length) {
+    allCb.checked = true;
+    allCb.indeterminate = false;
+  } else if (checkedCount === 0) {
+    allCb.checked = false;
+    allCb.indeterminate = false;
+  } else {
+    allCb.checked = false;
+    allCb.indeterminate = true;
+  }
+}
+
+function getAlertFormData() {
+  const cbs = document.querySelectorAll('.alert-subnet-cb');
+  const checkedCount = document.querySelectorAll('.alert-subnet-cb:checked').length;
+  const allChecked = cbs.length > 0 && checkedCount === cbs.length;
+  let subnets = [];
+  if (!allChecked) {
+    document.querySelectorAll('.alert-subnet-cb:checked').forEach(cb => subnets.push(cb.value));
+  }
+  const cfg = {
+    subnets: subnets,
+    type: 'email',
+    smtpHost: document.getElementById('alertSmtpHost').value,
+    smtpPort: parseInt(document.getElementById('alertSmtpPort').value) || 587,
+    smtpSSL: document.getElementById('alertSmtpSSL').checked,
+    smtpAuth: document.getElementById('alertSmtpAuth').checked,
+    smtpTo: document.getElementById('alertSmtpTo').value,
+  };
+  if (cfg.smtpAuth) {
+    cfg.smtpUser = document.getElementById('alertSmtpUser').value;
+    cfg.smtpPass = document.getElementById('alertSmtpPass').value;
+  }
+  return cfg;
+}
+
+function showAlertMsg(ok, text) {
+  const el = document.getElementById('alertMsg');
+  el.innerHTML = '<div class="alert-msg ' + (ok ? 'alert-msg-ok' : 'alert-msg-err') + '">' + esc(text) + '</div>';
+  setTimeout(() => { el.innerHTML = ''; }, 4000);
+}
+
+async function saveAlert() {
+  const cfg = getAlertFormData();
+  if (!cfg) return;
+  try {
+    await fetch('/api/alerts', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(cfg) });
+    showAlertMsg(true, t('alert_saved'));
+    loadAlertConfigs();
+  } catch(e) {
+    showAlertMsg(false, e.message);
+  }
+}
+
+async function testAlert() {
+  const cfg = getAlertFormData();
+  if (!cfg) return;
+  try {
+    const resp = await fetch('/api/alerts/test', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(cfg) });
+    const data = await resp.json();
+    if (data.status === 'ok') {
+      showAlertMsg(true, t('alert_test_ok'));
+    } else {
+      showAlertMsg(false, t('alert_test_fail').replace('{0}', data.message || ''));
+    }
+  } catch(e) {
+    showAlertMsg(false, t('alert_test_fail').replace('{0}', e.message));
+  }
+}
+
+async function deleteAlert(id) {
+  try {
+    await fetch('/api/alerts?id=' + encodeURIComponent(id), { method: 'DELETE' });
+    loadAlertConfigs();
+  } catch(e) { console.error(e); }
+}
+
+async function loadAlertConfigs() {
+  try {
+    const configs = await fetchJSON('/api/alerts');
+    renderAlertList(configs || []);
+  } catch(e) { console.error(e); }
+}
+
+function renderAlertList(configs) {
+  const container = document.getElementById('alertList');
+  if (configs.length === 0) {
+    container.innerHTML = '<div style="padding:12px 20px 16px;color:var(--text-secondary);font-size:13px" data-i18n="alert_no_configs">' + esc(t('alert_no_configs')) + '</div>';
+    return;
+  }
+  let html = '';
+  for (const c of configs) {
+    const subnetsLabel = c.subnets && c.subnets.length > 0 ? c.subnets.join(', ') : t('alert_subnets_all');
+    const detail = c.smtpTo || '';
+    const flags = [c.smtpHost + ':' + (c.smtpPort||25), c.smtpSSL ? 'SSL' : 'STARTTLS', c.smtpAuth ? 'AUTH' : ''].filter(Boolean).join(' | ');
+    html += '<div class="alert-list-item"><div class="alert-info"><strong>EMAIL</strong> &mdash; ' + esc(detail) + '<br><span style="font-size:12px;color:var(--text-secondary)">' + esc(flags) + ' / ' + esc(subnetsLabel) + '</span></div>'
+      + '<button class="btn-sm btn-danger" onclick="deleteAlert(\'' + escAttr(c.id) + '\')" data-i18n="btn_delete">' + esc(t('btn_delete')) + '</button></div>';
+  }
+  container.innerHTML = html;
 }
 
 // ── Init ──

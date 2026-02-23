@@ -83,8 +83,10 @@ func main() {
 	log.Printf("인터페이스: %s (%s, %s)", iface.Name, localIP, localMAC)
 	log.Printf("서브넷: %s", strings.Join(subnetStrs, ", "))
 
-	// Initialize scanner
+	// Initialize alert manager and scanner
+	alertMgr := NewAlertManager()
 	scanner := NewScanner(iface, localIP, localMAC, subnets)
+	scanner.alertMgr = alertMgr
 
 	if *autoScan {
 		log.Println("자동 스캔 시작...")
@@ -99,7 +101,7 @@ func main() {
 	}()
 
 	log.Printf("웹 서버 시작: %s", addr)
-	if err := startWebServer(*port, scanner, iface.Name); err != nil {
+	if err := startWebServer(*port, scanner, alertMgr, iface.Name); err != nil {
 		log.Fatalf("웹 서버 실패: %v", err)
 	}
 }

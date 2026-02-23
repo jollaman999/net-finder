@@ -164,6 +164,7 @@ type Scanner struct {
 	localMAC net.HardwareAddr
 	subnets  []*net.IPNet
 	oui      *OUIDatabase
+	alertMgr *AlertManager
 
 	state ScanState
 
@@ -627,6 +628,13 @@ func (s *Scanner) processARPResults(result *ARPResult) {
 	s.state.Hosts = sorted
 	s.state.Conflicts = conflicts
 	s.state.mu.Unlock()
+
+	// Send alerts for detected conflicts
+	if s.alertMgr != nil && len(conflicts) > 0 {
+		for _, c := range conflicts {
+			go s.alertMgr.SendConflictAlert(c)
+		}
+	}
 }
 
 // processDHCPResults converts DHCPServerInfo to DHCPServerJSON
@@ -849,6 +857,15 @@ func (s *Scanner) backgroundARPMonitor() {
 				}
 				if !merged {
 					s.state.ARPAlerts = append(s.state.ARPAlerts, a)
+					// Send conflict alert for new MAC change
+					if s.alertMgr != nil {
+						conflict := ConflictEntry{
+							IP:     a.IP,
+							MACs:   []string{a.OldMAC, a.NewMAC},
+							Subnet: s.findSubnet(net.ParseIP(a.IP)),
+						}
+						go s.alertMgr.SendConflictAlert(conflict)
+					}
 				}
 			}
 			s.state.mu.Unlock()
