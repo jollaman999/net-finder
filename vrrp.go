@@ -71,6 +71,10 @@ func parseVRRPPacket(packet gopacket.Packet) (VRRPEntry, bool) {
 	vrrpLayer := packet.Layer(layers.LayerTypeVRRP)
 	if vrrpLayer != nil {
 		vrrp := vrrpLayer.(*layers.VRRPv2)
+		// VRRP version must be 2 or 3
+		if vrrp.Version != 2 && vrrp.Version != 3 {
+			return entry, false
+		}
 		entry.Version = int(vrrp.Version)
 		entry.RouterID = int(vrrp.VirtualRtrID)
 		entry.Priority = int(vrrp.Priority)
@@ -92,14 +96,26 @@ func parseVRRPPacket(packet gopacket.Packet) (VRRPEntry, bool) {
 		}
 
 		entry.Version = int(payload[0] >> 4)
-		// type := payload[0] & 0x0f
+		vrrpType := int(payload[0] & 0x0f)
+
+		// VRRP version must be 2 or 3, type must be 1 (Advertisement)
+		if (entry.Version != 2 && entry.Version != 3) || vrrpType != 1 {
+			return entry, false
+		}
+
 		entry.RouterID = int(payload[1])
 		entry.Priority = int(payload[2])
 		countIPs := int(payload[3])
+
+		// Sanity check: IP count must fit within the payload
+		if countIPs == 0 || 8+countIPs*4 > len(payload) {
+			return entry, false
+		}
+
 		entry.AdverInt = int(payload[5])
 
 		offset := 8
-		for i := 0; i < countIPs && offset+4 <= len(payload); i++ {
+		for i := 0; i < countIPs; i++ {
 			ipAddr := fmt.Sprintf("%d.%d.%d.%d", payload[offset], payload[offset+1], payload[offset+2], payload[offset+3])
 			entry.IPAddresses = append(entry.IPAddresses, ipAddr)
 			offset += 4
