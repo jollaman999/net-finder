@@ -629,11 +629,9 @@ func (s *Scanner) processARPResults(result *ARPResult) {
 	s.state.Conflicts = conflicts
 	s.state.mu.Unlock()
 
-	// Send alerts for detected conflicts
+	// Send alerts for detected conflicts (grouped by subnet)
 	if s.alertMgr != nil && len(conflicts) > 0 {
-		for _, c := range conflicts {
-			go s.alertMgr.SendConflictAlert(c)
-		}
+		go s.alertMgr.SendConflictAlerts(conflicts)
 	}
 }
 
@@ -842,6 +840,7 @@ func (s *Scanner) backgroundARPMonitor() {
 			continue
 		}
 		if len(alerts) > 0 {
+			var newConflicts []ConflictEntry
 			s.state.mu.Lock()
 			for _, a := range alerts {
 				key := a.IP + ":" + a.NewMAC
@@ -857,18 +856,17 @@ func (s *Scanner) backgroundARPMonitor() {
 				}
 				if !merged {
 					s.state.ARPAlerts = append(s.state.ARPAlerts, a)
-					// Send conflict alert for new MAC change
-					if s.alertMgr != nil {
-						conflict := ConflictEntry{
-							IP:     a.IP,
-							MACs:   []string{a.OldMAC, a.NewMAC},
-							Subnet: s.findSubnet(net.ParseIP(a.IP)),
-						}
-						go s.alertMgr.SendConflictAlert(conflict)
-					}
+					newConflicts = append(newConflicts, ConflictEntry{
+						IP:     a.IP,
+						MACs:   []string{a.OldMAC, a.NewMAC},
+						Subnet: s.findSubnet(net.ParseIP(a.IP)),
+					})
 				}
 			}
 			s.state.mu.Unlock()
+			if s.alertMgr != nil && len(newConflicts) > 0 {
+				go s.alertMgr.SendConflictAlerts(newConflicts)
+			}
 		}
 	}
 }
