@@ -8,25 +8,23 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
 )
 
 // ListenLLDP listens for LLDP frames on the given interface
 func ListenLLDP(ifaceName string, duration time.Duration, stopCh <-chan struct{}) ([]LLDPNeighbor, error) {
-	handle, err := pcap.OpenLive(ifaceName, 65536, true, 500*time.Millisecond)
+	sock, err := NewRawSocket(ifaceName)
 	if err != nil {
-		return nil, fmt.Errorf("LLDP pcap 열기 실패: %v", err)
+		return nil, fmt.Errorf("LLDP 소켓 열기 실패: %v", err)
 	}
-	defer handle.Close()
+	defer sock.Close()
 
-	if err := handle.SetBPFFilter("ether proto 0x88cc"); err != nil {
+	if err := sock.SetBPFFilter(bpfFilterLLDP()); err != nil {
 		return nil, fmt.Errorf("LLDP BPF 필터 설정 실패: %v", err)
 	}
 
 	var entries []LLDPNeighbor
 	seen := make(map[string]bool)
 	deadline := time.Now().Add(duration)
-	src := gopacket.NewPacketSource(handle, handle.LinkType())
 
 	for time.Now().Before(deadline) {
 		select {
@@ -35,10 +33,15 @@ func ListenLLDP(ifaceName string, duration time.Duration, stopCh <-chan struct{}
 		default:
 		}
 
-		packet, err := src.NextPacket()
+		data, err := sock.ReadPacket()
 		if err != nil {
 			continue
 		}
+		if data == nil {
+			continue
+		}
+
+		packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
 
 		entry, ok := parseLLDPPacket(packet)
 		if !ok {

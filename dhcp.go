@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
 )
 
 type DHCPServerInfo struct {
@@ -21,26 +20,26 @@ type DHCPServerInfo struct {
 }
 
 func DetectDHCP(iface *net.Interface, localMAC net.HardwareAddr, timeout time.Duration) ([]DHCPServerInfo, error) {
-	handle, err := pcap.OpenLive(iface.Name, 65536, true, 500*time.Millisecond)
+	sock, err := NewRawSocket(iface.Name)
 	if err != nil {
-		return nil, fmt.Errorf("pcap 열기 실패: %v", err)
+		return nil, fmt.Errorf("소켓 열기 실패: %v", err)
 	}
-	defer handle.Close()
+	defer sock.Close()
 
-	if err := handle.SetBPFFilter("udp and (port 67 or port 68)"); err != nil {
+	if err := sock.SetBPFFilter(bpfFilterDHCP()); err != nil {
 		return nil, fmt.Errorf("BPF 필터 설정 실패: %v", err)
 	}
 
 	xid := uint32(time.Now().UnixNano() & 0xFFFFFFFF)
 
-	if err := sendDHCPDiscover(handle, iface, localMAC, xid); err != nil {
+	if err := sendDHCPDiscover(sock, iface, localMAC, xid); err != nil {
 		return nil, fmt.Errorf("DHCP Discover 전송 실패: %v", err)
 	}
 
-	return listenDHCPOffers(handle, xid, timeout)
+	return listenDHCPOffers(sock, xid, timeout)
 }
 
-func sendDHCPDiscover(handle *pcap.Handle, iface *net.Interface, srcMAC net.HardwareAddr, xid uint32) error {
+func sendDHCPDiscover(sock *RawSocket, iface *net.Interface, srcMAC net.HardwareAddr, xid uint32) error {
 	eth := layers.Ethernet{
 		SrcMAC:       srcMAC,
 		DstMAC:       net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
@@ -94,21 +93,25 @@ func sendDHCPDiscover(handle *pcap.Handle, iface *net.Interface, srcMAC net.Hard
 		return err
 	}
 
-	return handle.WritePacketData(buf.Bytes())
+	return sock.WritePacket(buf.Bytes())
 }
 
-func listenDHCPOffers(handle *pcap.Handle, xid uint32, timeout time.Duration) ([]DHCPServerInfo, error) {
+func listenDHCPOffers(sock *RawSocket, xid uint32, timeout time.Duration) ([]DHCPServerInfo, error) {
 	var servers []DHCPServerInfo
 	seen := make(map[string]bool)
 
 	deadline := time.Now().Add(timeout)
-	src := gopacket.NewPacketSource(handle, handle.LinkType())
 
 	for time.Now().Before(deadline) {
-		packet, err := src.NextPacket()
+		data, err := sock.ReadPacket()
 		if err != nil {
 			continue
 		}
+		if data == nil {
+			continue
+		}
+
+		packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
 
 		dhcpLayer := packet.Layer(layers.LayerTypeDHCPv4)
 		if dhcpLayer == nil {

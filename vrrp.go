@@ -6,25 +6,23 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
 )
 
 // ListenVRRP listens for VRRP packets on the given interface
 func ListenVRRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}) ([]VRRPEntry, error) {
-	handle, err := pcap.OpenLive(ifaceName, 65536, true, 500*time.Millisecond)
+	sock, err := NewRawSocket(ifaceName)
 	if err != nil {
-		return nil, fmt.Errorf("VRRP pcap 열기 실패: %v", err)
+		return nil, fmt.Errorf("VRRP 소켓 열기 실패: %v", err)
 	}
-	defer handle.Close()
+	defer sock.Close()
 
-	if err := handle.SetBPFFilter("ip proto 112"); err != nil {
+	if err := sock.SetBPFFilter(bpfFilterVRRP()); err != nil {
 		return nil, fmt.Errorf("VRRP BPF 필터 설정 실패: %v", err)
 	}
 
 	var entries []VRRPEntry
 	seen := make(map[string]bool)
 	deadline := time.Now().Add(duration)
-	src := gopacket.NewPacketSource(handle, handle.LinkType())
 
 	for time.Now().Before(deadline) {
 		select {
@@ -33,10 +31,15 @@ func ListenVRRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}
 		default:
 		}
 
-		packet, err := src.NextPacket()
+		data, err := sock.ReadPacket()
 		if err != nil {
 			continue
 		}
+		if data == nil {
+			continue
+		}
+
+		packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
 
 		entry, ok := parseVRRPPacket(packet)
 		if !ok {

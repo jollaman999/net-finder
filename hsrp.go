@@ -7,35 +7,33 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
 )
 
 // HSRP state names
 var hsrpStateNames = map[byte]string{
-	0: "Initial",
-	1: "Learn",
-	2: "Listen",
-	4: "Speak",
-	8: "Standby",
+	0:  "Initial",
+	1:  "Learn",
+	2:  "Listen",
+	4:  "Speak",
+	8:  "Standby",
 	16: "Active",
 }
 
 // ListenHSRP listens for HSRP packets on the given interface
 func ListenHSRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}) ([]HSRPEntry, error) {
-	handle, err := pcap.OpenLive(ifaceName, 65536, true, 500*time.Millisecond)
+	sock, err := NewRawSocket(ifaceName)
 	if err != nil {
-		return nil, fmt.Errorf("HSRP pcap 열기 실패: %v", err)
+		return nil, fmt.Errorf("HSRP 소켓 열기 실패: %v", err)
 	}
-	defer handle.Close()
+	defer sock.Close()
 
-	if err := handle.SetBPFFilter("udp and dst port 1985"); err != nil {
+	if err := sock.SetBPFFilter(bpfFilterHSRP()); err != nil {
 		return nil, fmt.Errorf("HSRP BPF 필터 설정 실패: %v", err)
 	}
 
 	var entries []HSRPEntry
 	seen := make(map[string]bool)
 	deadline := time.Now().Add(duration)
-	src := gopacket.NewPacketSource(handle, handle.LinkType())
 
 	for time.Now().Before(deadline) {
 		select {
@@ -44,10 +42,15 @@ func ListenHSRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}
 		default:
 		}
 
-		packet, err := src.NextPacket()
+		data, err := sock.ReadPacket()
 		if err != nil {
 			continue
 		}
+		if data == nil {
+			continue
+		}
+
+		packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
 
 		entry, ok := parseHSRPPacket(packet)
 		if !ok {

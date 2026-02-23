@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
 )
 
 type ARPResult struct {
@@ -41,25 +40,29 @@ func (r *ARPResult) Add(ip net.IP, mac net.HardwareAddr) {
 }
 
 func DiscoverSubnets(iface *net.Interface, duration time.Duration) ([]*net.IPNet, error) {
-	handle, err := pcap.OpenLive(iface.Name, 65536, true, 500*time.Millisecond)
+	sock, err := NewRawSocket(iface.Name)
 	if err != nil {
-		return nil, fmt.Errorf("pcap 열기 실패: %v", err)
+		return nil, fmt.Errorf("소켓 열기 실패: %v", err)
 	}
-	defer handle.Close()
+	defer sock.Close()
 
-	if err := handle.SetBPFFilter("arp"); err != nil {
+	if err := sock.SetBPFFilter(bpfFilterARP()); err != nil {
 		return nil, fmt.Errorf("BPF 필터 설정 실패: %v", err)
 	}
 
 	seen := make(map[string]bool)
 	deadline := time.Now().Add(duration)
-	src := gopacket.NewPacketSource(handle, handle.LinkType())
 
 	for time.Now().Before(deadline) {
-		packet, err := src.NextPacket()
+		data, err := sock.ReadPacket()
 		if err != nil {
 			continue
 		}
+		if data == nil {
+			continue
+		}
+
+		packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
 
 		arpLayer := packet.Layer(layers.LayerTypeARP)
 		if arpLayer == nil {
@@ -93,13 +96,13 @@ func DiscoverSubnets(iface *net.Interface, duration time.Duration) ([]*net.IPNet
 }
 
 func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, subnets []*net.IPNet, timeout time.Duration) (*ARPResult, error) {
-	handle, err := pcap.OpenLive(iface.Name, 65536, true, 500*time.Millisecond)
+	sock, err := NewRawSocket(iface.Name)
 	if err != nil {
-		return nil, fmt.Errorf("pcap 열기 실패: %v", err)
+		return nil, fmt.Errorf("소켓 열기 실패: %v", err)
 	}
-	defer handle.Close()
+	defer sock.Close()
 
-	if err := handle.SetBPFFilter("arp"); err != nil {
+	if err := sock.SetBPFFilter(bpfFilterARP()); err != nil {
 		return nil, fmt.Errorf("BPF 필터 설정 실패: %v", err)
 	}
 
@@ -110,7 +113,7 @@ func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, su
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		readARPResponses(handle, result, done)
+		readARPResponses(sock, result, done)
 	}()
 
 	time.Sleep(100 * time.Millisecond)
@@ -123,9 +126,9 @@ func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, su
 
 		for _, ip := range ips {
 			if isLocal {
-				sendARPRequest(handle, iface, localIP, localMAC, ip)
+				sendARPRequest(sock, iface, localIP, localMAC, ip)
 			} else {
-				sendARPProbe(handle, iface, localMAC, ip)
+				sendARPProbe(sock, iface, localMAC, ip)
 			}
 			time.Sleep(500 * time.Microsecond)
 		}
@@ -147,7 +150,7 @@ func localSubnet(localIP net.IP, subnets []*net.IPNet) *net.IPNet {
 	return nil
 }
 
-func sendARPProbe(handle *pcap.Handle, iface *net.Interface, srcMAC net.HardwareAddr, dstIP net.IP) error {
+func sendARPProbe(sock *RawSocket, iface *net.Interface, srcMAC net.HardwareAddr, dstIP net.IP) error {
 	eth := layers.Ethernet{
 		SrcMAC:       srcMAC,
 		DstMAC:       net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
@@ -176,10 +179,10 @@ func sendARPProbe(handle *pcap.Handle, iface *net.Interface, srcMAC net.Hardware
 		return err
 	}
 
-	return handle.WritePacketData(buf.Bytes())
+	return sock.WritePacket(buf.Bytes())
 }
 
-func sendARPRequest(handle *pcap.Handle, iface *net.Interface, srcIP net.IP, srcMAC net.HardwareAddr, dstIP net.IP) error {
+func sendARPRequest(sock *RawSocket, iface *net.Interface, srcIP net.IP, srcMAC net.HardwareAddr, dstIP net.IP) error {
 	eth := layers.Ethernet{
 		SrcMAC:       srcMAC,
 		DstMAC:       net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
@@ -208,12 +211,10 @@ func sendARPRequest(handle *pcap.Handle, iface *net.Interface, srcIP net.IP, src
 		return err
 	}
 
-	return handle.WritePacketData(buf.Bytes())
+	return sock.WritePacket(buf.Bytes())
 }
 
-func readARPResponses(handle *pcap.Handle, result *ARPResult, done <-chan struct{}) {
-	src := gopacket.NewPacketSource(handle, handle.LinkType())
-
+func readARPResponses(sock *RawSocket, result *ARPResult, done <-chan struct{}) {
 	for {
 		select {
 		case <-done:
@@ -221,7 +222,7 @@ func readARPResponses(handle *pcap.Handle, result *ARPResult, done <-chan struct
 		default:
 		}
 
-		packet, err := src.NextPacket()
+		data, err := sock.ReadPacket()
 		if err != nil {
 			select {
 			case <-done:
@@ -230,6 +231,11 @@ func readARPResponses(handle *pcap.Handle, result *ARPResult, done <-chan struct
 				continue
 			}
 		}
+		if data == nil {
+			continue
+		}
+
+		packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
 
 		arpLayer := packet.Layer(layers.LayerTypeARP)
 		if arpLayer == nil {

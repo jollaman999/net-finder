@@ -10,28 +10,26 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
 )
 
 // MonitorARP monitors ARP traffic for spoofing indicators
 func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string, duration time.Duration, stopCh <-chan struct{}) ([]ARPSpoofAlert, error) {
-	handle, err := pcap.OpenLive(ifaceName, 65536, true, 500*time.Millisecond)
+	sock, err := NewRawSocket(ifaceName)
 	if err != nil {
-		return nil, fmt.Errorf("ARP 모니터 pcap 열기 실패: %v", err)
+		return nil, fmt.Errorf("ARP 모니터 소켓 열기 실패: %v", err)
 	}
-	defer handle.Close()
+	defer sock.Close()
 
-	if err := handle.SetBPFFilter("arp"); err != nil {
+	if err := sock.SetBPFFilter(bpfFilterARP()); err != nil {
 		return nil, fmt.Errorf("ARP 모니터 BPF 필터 설정 실패: %v", err)
 	}
 
-	// key → alert index + packet count
+	// key -> alert index + packet count
 	alertIndex := make(map[string]int)
 	var alerts []ARPSpoofAlert
 	var mu sync.Mutex
 
 	deadline := time.Now().Add(duration)
-	src := gopacket.NewPacketSource(handle, handle.LinkType())
 
 	for time.Now().Before(deadline) {
 		select {
@@ -40,10 +38,15 @@ func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string
 		default:
 		}
 
-		packet, err := src.NextPacket()
+		data, err := sock.ReadPacket()
 		if err != nil {
 			continue
 		}
+		if data == nil {
+			continue
+		}
+
+		packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
 
 		arpLayer := packet.Layer(layers.LayerTypeARP)
 		if arpLayer == nil {
@@ -144,10 +147,10 @@ func CheckDNSSpoofing(dnsServers []string) []DNSSpoofAlert {
 
 	for _, domain := range testDomains {
 		type dnsResult struct {
-			server   string
-			ips      []string
-			elapsed  time.Duration
-			err      error
+			server  string
+			ips     []string
+			elapsed time.Duration
+			err     error
 		}
 
 		results := make([]dnsResult, len(servers))
@@ -252,4 +255,3 @@ func normalizeIP(ip string) string {
 	}
 	return ip
 }
-

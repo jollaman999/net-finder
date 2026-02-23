@@ -11,9 +11,9 @@ import (
 
 // ProgressInfo represents scan progress
 type ProgressInfo struct {
-	Phase       string `json:"phase"`
-	Description string `json:"description"`
-	Percent     int    `json:"percent"`
+	Phase   string `json:"phase"`
+	Percent int    `json:"percent"`
+	Count   int    `json:"count,omitempty"`
 }
 
 // HostEntry represents a discovered host
@@ -243,12 +243,12 @@ func (s *Scanner) stopped() bool {
 	}
 }
 
-func (s *Scanner) setProgress(phase, desc string, percent int) {
+func (s *Scanner) setProgress(phase string, percent, count int) {
 	s.state.mu.Lock()
 	s.state.Progress = ProgressInfo{
-		Phase:       phase,
-		Description: desc,
-		Percent:     percent,
+		Phase:   phase,
+		Percent: percent,
+		Count:   count,
 	}
 	s.state.mu.Unlock()
 }
@@ -423,7 +423,7 @@ func (s *Scanner) run() {
 	s.state.mu.Unlock()
 
 	// Phase 1: Load OUI (0-5%)
-	s.setProgress("oui", "OUI 데이터베이스 로드 중...", 0)
+	s.setProgress("oui_loading", 0, 0)
 	if s.stopped() {
 		return
 	}
@@ -438,13 +438,13 @@ func (s *Scanner) run() {
 		}
 	}
 	s.oui = oui
-	s.setProgress("oui", fmt.Sprintf("OUI 로드 완료 (%d개 벤더)", len(oui.Vendors)), 5)
+	s.setProgress("oui_done", 5, len(oui.Vendors))
 	if s.stopped() {
 		return
 	}
 
 	// All phases run in parallel after OUI load
-	s.setProgress("scan", "병렬 스캔 중 (ARP, DHCP, HSRP/VRRP/LLDP/CDP)...", 10)
+	s.setProgress("scan_parallel", 10, 0)
 
 	var scanWg sync.WaitGroup
 
@@ -459,7 +459,7 @@ func (s *Scanner) run() {
 		}
 		s.arpResult = result
 		s.processARPResults(result)
-		s.setProgress("scan", fmt.Sprintf("ARP 완료 (%d개 호스트), 호스트명 해석 중...", len(s.GetHosts())), 30)
+		s.setProgress("scan_arp_done", 30, len(s.GetHosts()))
 
 		if s.stopped() {
 			return
@@ -539,7 +539,7 @@ func (s *Scanner) run() {
 		return
 	}
 
-	s.setProgress("done", "스캔 완료", 100)
+	s.setProgress("scan_done", 100, 0)
 	s.state.mu.Lock()
 	s.state.Status = "done"
 	s.state.mu.Unlock()
