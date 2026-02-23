@@ -19,7 +19,7 @@ func main() {
 	autoScan := flag.Bool("auto", true, "시작 시 자동 스캔")
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Net Finder - 네트워크 스캐너 웹 대시보드\n\n")
+		fmt.Fprintf(os.Stderr, "Net Finder\n\n")
 		fmt.Fprintf(os.Stderr, "Usage:\n  sudo %s [options]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
