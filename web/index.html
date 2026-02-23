@@ -706,7 +706,8 @@ tr.subnet-header:hover { background: var(--primary-light); }
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="testAlert()" data-i18n="btn_test">Test</button>
-      <button class="btn btn-primary" onclick="saveAlert()" data-i18n="btn_save">Save</button>
+      <button class="btn" id="btnAlertCancel" onclick="cancelEditAlert()" style="display:none" data-i18n="btn_cancel">Cancel</button>
+      <button class="btn btn-primary" id="btnAlertSave" onclick="saveAlert()" data-i18n="btn_save">Save</button>
     </div>
     <div class="alert-list" id="alertList"></div>
   </div>
@@ -806,10 +807,14 @@ const i18n = {
     alert_smtp_pass: 'Password',
     btn_test: 'Test',
     btn_save: 'Save',
+    btn_update: 'Update',
+    btn_cancel: 'Cancel',
+    btn_edit: 'Edit',
     btn_delete: 'Delete',
     alert_test_ok: 'Test alert sent successfully',
     alert_test_fail: 'Test failed: {0}',
     alert_saved: 'Alert saved',
+    alert_updated: 'Alert updated',
     alert_no_configs: 'No alert rules configured.',
   },
   ko: {
@@ -903,10 +908,14 @@ const i18n = {
     alert_smtp_pass: '비밀번호',
     btn_test: '테스트',
     btn_save: '저장',
+    btn_update: '수정',
+    btn_cancel: '취소',
+    btn_edit: '수정',
     btn_delete: '삭제',
     alert_test_ok: '테스트 알림 발송 성공',
     alert_test_fail: '테스트 실패: {0}',
     alert_saved: '알림 저장 완료',
+    alert_updated: '알림 수정 완료',
     alert_no_configs: '설정된 알림 규칙이 없습니다.',
   }
 };
@@ -1473,10 +1482,43 @@ function filterTable(tableId, query) {
 }
 
 // ── Alert Modal ──
-function openAlertModal() {
-  const modal = document.getElementById('alertModal');
-  modal.style.display = '';
-  // Reset form
+let editingAlertId = null;
+
+function getAlertSubnets() {
+  return (scannerSubnets.length > 0 ? scannerSubnets : (knownSubnets.hosts.length > 0 ? knownSubnets.hosts : knownSubnets.conflicts))
+    .slice().sort((a, b) => { const pa = a.split('/')[0]||'', pb = b.split('/')[0]||''; return isIP(pa) && isIP(pb) ? compareIP(pa, pb) : a.localeCompare(b); });
+}
+
+function populateAlertSubnets(selectedSubnets) {
+  const container = document.getElementById('alertSubnetList');
+  const subnets = getAlertSubnets();
+  const isAll = !selectedSubnets || selectedSubnets.length === 0;
+  let html = '<label><input type="checkbox" id="alertSubnetAll"' + (isAll ? ' checked' : '') + ' onchange="toggleAlertSubnetsAll(this.checked)"> ' + esc(t('alert_subnets_all')) + '</label>';
+  for (const s of subnets) {
+    const checked = isAll || selectedSubnets.includes(s);
+    html += '<label><input type="checkbox" class="alert-subnet-cb" value="' + escAttr(s) + '"' + (checked ? ' checked' : '') + ' onchange="updateAlertSubnetAll()"> ' + esc(s) + '</label>';
+  }
+  container.innerHTML = html;
+  if (!isAll) updateAlertSubnetAll();
+}
+
+function setEditMode(editing) {
+  editingAlertId = editing ? editingAlertId : null;
+  const saveBtn = document.getElementById('btnAlertSave');
+  const cancelBtn = document.getElementById('btnAlertCancel');
+  if (editing) {
+    saveBtn.textContent = t('btn_update');
+    saveBtn.setAttribute('data-i18n', 'btn_update');
+    cancelBtn.style.display = '';
+  } else {
+    saveBtn.textContent = t('btn_save');
+    saveBtn.setAttribute('data-i18n', 'btn_save');
+    cancelBtn.style.display = 'none';
+  }
+}
+
+function resetAlertForm() {
+  editingAlertId = null;
   document.getElementById('alertSmtpFrom').value = '';
   document.getElementById('alertSmtpHost').value = '';
   document.getElementById('alertSmtpPort').value = '465';
@@ -1487,16 +1529,13 @@ function openAlertModal() {
   document.getElementById('alertSmtpPass').value = '';
   document.getElementById('alertSmtpTo').value = '';
   document.getElementById('alertMsg').innerHTML = '';
-  // Populate subnets from scanner config
-  const container = document.getElementById('alertSubnetList');
-  const subnets = (scannerSubnets.length > 0 ? scannerSubnets : (knownSubnets.hosts.length > 0 ? knownSubnets.hosts : knownSubnets.conflicts))
-    .slice().sort((a, b) => { const pa = a.split('/')[0]||'', pb = b.split('/')[0]||''; return isIP(pa) && isIP(pb) ? compareIP(pa, pb) : a.localeCompare(b); });
-  let html = '<label><input type="checkbox" id="alertSubnetAll" checked onchange="toggleAlertSubnetsAll(this.checked)"> ' + esc(t('alert_subnets_all')) + '</label>';
-  for (const s of subnets) {
-    html += '<label><input type="checkbox" class="alert-subnet-cb" value="' + escAttr(s) + '" checked onchange="updateAlertSubnetAll()"> ' + esc(s) + '</label>';
-  }
-  container.innerHTML = html;
-  // Load saved configs
+  populateAlertSubnets(null);
+  setEditMode(false);
+}
+
+function openAlertModal() {
+  document.getElementById('alertModal').style.display = '';
+  resetAlertForm();
   loadAlertConfigs();
 }
 
@@ -1574,12 +1613,45 @@ async function saveAlert() {
   const cfg = getAlertFormData();
   if (!cfg) return;
   try {
-    await fetch('/api/alerts', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(cfg) });
-    showAlertMsg(true, t('alert_saved'));
+    if (editingAlertId) {
+      cfg.id = editingAlertId;
+      await fetch('/api/alerts', { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(cfg) });
+      showAlertMsg(true, t('alert_updated'));
+      resetAlertForm();
+    } else {
+      await fetch('/api/alerts', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(cfg) });
+      showAlertMsg(true, t('alert_saved'));
+    }
     loadAlertConfigs();
   } catch(e) {
     showAlertMsg(false, e.message);
   }
+}
+
+function editAlert(id) {
+  fetch('/api/alerts').then(r => r.json()).then(configs => {
+    const cfg = (configs || []).find(c => c.id === id);
+    if (!cfg) return;
+    editingAlertId = id;
+    document.getElementById('alertSmtpFrom').value = cfg.smtpFrom || '';
+    document.getElementById('alertSmtpTo').value = cfg.smtpTo || '';
+    document.getElementById('alertSmtpHost').value = cfg.smtpHost || '';
+    document.getElementById('alertSmtpPort').value = cfg.smtpPort || 465;
+    document.getElementById('alertSmtpSSL').checked = !!cfg.smtpSSL;
+    document.getElementById('alertSmtpAuth').checked = !!cfg.smtpAuth;
+    document.getElementById('alertFieldsAuth').style.display = cfg.smtpAuth ? '' : 'none';
+    document.getElementById('alertSmtpUser').value = cfg.smtpUser || '';
+    document.getElementById('alertSmtpPass').value = cfg.smtpPass || '';
+    populateAlertSubnets(cfg.subnets);
+    setEditMode(true);
+    document.getElementById('alertMsg').innerHTML = '';
+    // Scroll to top of modal
+    document.querySelector('#alertModal .modal').scrollTop = 0;
+  });
+}
+
+function cancelEditAlert() {
+  resetAlertForm();
 }
 
 async function testAlert() {
@@ -1624,7 +1696,10 @@ function renderAlertList(configs) {
     const fromTo = (c.smtpFrom || '?') + ' &rarr; ' + (c.smtpTo || '?');
     const flags = [c.smtpHost + ':' + (c.smtpPort||465), c.smtpSSL ? 'SSL' : 'STARTTLS', c.smtpAuth ? 'AUTH' : ''].filter(Boolean).join(' | ');
     html += '<div class="alert-list-item"><div class="alert-info"><strong>EMAIL</strong> &mdash; ' + fromTo + '<br><span style="font-size:12px;color:var(--text-secondary)">' + esc(flags) + ' / ' + esc(subnetsLabel) + '</span></div>'
-      + '<button class="btn-sm btn-danger" onclick="deleteAlert(\'' + escAttr(c.id) + '\')" data-i18n="btn_delete">' + esc(t('btn_delete')) + '</button></div>';
+      + '<div style="display:flex;gap:4px">'
+      + '<button class="btn-sm btn-primary" onclick="editAlert(\'' + escAttr(c.id) + '\')" data-i18n="btn_edit">' + esc(t('btn_edit')) + '</button>'
+      + '<button class="btn-sm btn-danger" onclick="deleteAlert(\'' + escAttr(c.id) + '\')" data-i18n="btn_delete">' + esc(t('btn_delete')) + '</button>'
+      + '</div></div>';
   }
   container.innerHTML = html;
 }

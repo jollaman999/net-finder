@@ -169,6 +169,20 @@ func (am *AlertManager) AddConfig(cfg AlertConfig) {
 	am.save()
 }
 
+// UpdateConfig updates an existing alert configuration by ID and saves to file
+func (am *AlertManager) UpdateConfig(cfg AlertConfig) bool {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	for i, c := range am.configs {
+		if c.ID == cfg.ID {
+			am.configs[i] = cfg
+			am.save()
+			return true
+		}
+	}
+	return false
+}
+
 // DeleteConfig removes an alert configuration by ID and saves to file
 func (am *AlertManager) DeleteConfig(id string) bool {
 	am.mu.Lock()

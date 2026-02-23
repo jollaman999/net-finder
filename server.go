@@ -153,6 +153,21 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			}
 			alertMgr.AddConfig(cfg)
 			writeJSON(w, map[string]string{"status": "ok"})
+		case http.MethodPut:
+			var cfg AlertConfig
+			if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+				http.Error(w, "Invalid JSON", http.StatusBadRequest)
+				return
+			}
+			if cfg.ID == "" {
+				http.Error(w, "id required", http.StatusBadRequest)
+				return
+			}
+			if alertMgr.UpdateConfig(cfg) {
+				writeJSON(w, map[string]string{"status": "ok"})
+			} else {
+				http.Error(w, "not found", http.StatusNotFound)
+			}
 		case http.MethodDelete:
 			id := r.URL.Query().Get("id")
 			if id == "" {
