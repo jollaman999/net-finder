@@ -23,7 +23,7 @@ A real-time network scanner and monitoring dashboard with a built-in web UI. Net
 
 ## Requirements
 
-- Linux (x86_64 / arm64)
+- Linux
 - Go 1.21+
 - Root privileges (required for raw packet capture)
 
