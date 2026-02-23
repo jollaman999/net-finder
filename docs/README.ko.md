@@ -1,6 +1,6 @@
 # Net Finder
 
-로컬 네트워크의 호스트를 실시간으로 탐색하고 모니터링하는 웹 대시보드입니다. 네트워크 인프라 탐지와 보안 위협 감시까지 단일 바이너리로 수행합니다.
+로컬 네트워크의 호스트를 실시간으로 탐색하고 모니터링하는 웹 대시보드입니다. 네트워크 인프라 탐지와 보안 위협 감시까지 단일 정적 바이너리로 수행합니다.
 
 ## 기능
 
@@ -21,28 +21,22 @@
 
 ## 요구 사항
 
-- Linux 또는 macOS
+- Linux (x86_64 / arm64)
 - Go 1.21 이상
-- `libpcap-dev` (Linux) 또는 `libpcap` (macOS)
 - root 권한 (원시 패킷 캡처에 필요)
 
-### libpcap 설치
-
-```bash
-# Debian / Ubuntu
-sudo apt install libpcap-dev
-
-# RHEL / Fedora
-sudo dnf install libpcap-devel
-
-# macOS (Xcode Command Line Tools에 포함)
-xcode-select --install
-```
+외부 C 라이브러리가 필요 없습니다. Linux AF_PACKET raw socket을 직접 사용하여 런타임 의존성 없는 완전 정적 바이너리를 생성합니다.
 
 ## 빌드
 
 ```bash
 make build
+```
+
+CGo를 비활성화한 명시적 정적 빌드:
+
+```bash
+CGO_ENABLED=0 make build
 ```
 
 기타 타겟:
@@ -104,6 +98,8 @@ sudo ./net-finder -auto=false
 3. **백그라운드 모니터링** — 초기 스캔 완료 후 지속적으로 감시합니다:
    - 새로운 HSRP/VRRP/LLDP/CDP 광고
    - 스푸핑 가능성을 나타내는 ARP 트래픽 이상
+
+패킷 캡처는 Linux `AF_PACKET` raw socket과 커널 수준 BPF 필터를 사용하여 libpcap 없이 동작합니다. 패킷 파싱은 `gopacket/layers` (순수 Go)로 처리합니다.
 
 ## API 엔드포인트
 

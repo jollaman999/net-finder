@@ -1,6 +1,6 @@
 # Net Finder
 
-A real-time network scanner and monitoring dashboard with a built-in web UI. Net Finder discovers hosts on your local network, detects network infrastructure, and monitors for security threats — all from a single binary.
+A real-time network scanner and monitoring dashboard with a built-in web UI. Net Finder discovers hosts on your local network, detects network infrastructure, and monitors for security threats — all from a single static binary.
 
 ## Features
 
@@ -21,28 +21,22 @@ A real-time network scanner and monitoring dashboard with a built-in web UI. Net
 
 ## Requirements
 
-- Linux or macOS
+- Linux (x86_64 / arm64)
 - Go 1.21+
-- `libpcap-dev` (Linux) or `libpcap` (macOS)
 - Root privileges (required for raw packet capture)
 
-### Installing libpcap
-
-```bash
-# Debian / Ubuntu
-sudo apt install libpcap-dev
-
-# RHEL / Fedora
-sudo dnf install libpcap-devel
-
-# macOS (included with Xcode Command Line Tools)
-xcode-select --install
-```
+No external C libraries are needed. Net Finder uses Linux AF_PACKET raw sockets directly, producing a fully static binary with no runtime dependencies.
 
 ## Build
 
 ```bash
 make build
+```
+
+For an explicitly static build with CGo disabled:
+
+```bash
+CGO_ENABLED=0 make build
 ```
 
 Other targets:
@@ -104,6 +98,8 @@ The web dashboard opens automatically at `http://localhost:9090` (or your chosen
 3. **Background monitoring** — After the initial scan completes, continuously listens for:
    - New HSRP/VRRP/LLDP/CDP advertisements
    - ARP traffic anomalies indicating potential spoofing
+
+Packet capture uses Linux `AF_PACKET` raw sockets with kernel-level BPF filters, bypassing the need for libpcap. Packet parsing is handled by `gopacket/layers` (pure Go).
 
 ## API Endpoints
 
