@@ -194,3 +194,26 @@ func sortIPStrings(ips []string) {
 		return binary.BigEndian.Uint32(a) < binary.BigEndian.Uint32(b)
 	})
 }
+
+func sortCIDRStrings(cidrs []string) {
+	sort.Slice(cidrs, func(i, j int) bool {
+		_, netA, errA := net.ParseCIDR(cidrs[i])
+		_, netB, errB := net.ParseCIDR(cidrs[j])
+		if errA != nil || errB != nil {
+			return cidrs[i] < cidrs[j]
+		}
+		ipA := netA.IP.To4()
+		ipB := netB.IP.To4()
+		if ipA == nil || ipB == nil {
+			return cidrs[i] < cidrs[j]
+		}
+		a := binary.BigEndian.Uint32(ipA)
+		b := binary.BigEndian.Uint32(ipB)
+		if a != b {
+			return a < b
+		}
+		onesA, _ := netA.Mask.Size()
+		onesB, _ := netB.Mask.Size()
+		return onesA < onesB
+	})
+}

@@ -980,6 +980,7 @@ const collapsed = { hosts: new Set(), conflicts: new Set() };
 const enabledSubnets = { hosts: new Set(), conflicts: new Set() };
 // Track known subnets to detect changes
 let knownSubnets = { hosts: [], conflicts: [] };
+let scannerSubnets = []; // subnets configured in scanner
 
 // Sort state per table: { col, asc } or null
 const activeSort = {};
@@ -1103,6 +1104,7 @@ function updateStatus(data) {
   pct.textContent = (p.percent || 0) + '%';
   document.getElementById('btnScan').disabled = data.status === 'running';
   document.getElementById('btnStop').disabled = data.status !== 'running';
+  if (data.subnets && data.subnets.length > 0) scannerSubnets = data.subnets;
 }
 
 function updateBadges(hosts, conflicts, dhcp, arpAlerts, dnsAlerts) {
@@ -1485,9 +1487,10 @@ function openAlertModal() {
   document.getElementById('alertSmtpPass').value = '';
   document.getElementById('alertSmtpTo').value = '';
   document.getElementById('alertMsg').innerHTML = '';
-  // Populate subnets from conflicts data
+  // Populate subnets from scanner config
   const container = document.getElementById('alertSubnetList');
-  const subnets = knownSubnets.conflicts.length > 0 ? knownSubnets.conflicts : knownSubnets.hosts;
+  const subnets = (scannerSubnets.length > 0 ? scannerSubnets : (knownSubnets.hosts.length > 0 ? knownSubnets.hosts : knownSubnets.conflicts))
+    .slice().sort((a, b) => { const pa = a.split('/')[0]||'', pb = b.split('/')[0]||''; return isIP(pa) && isIP(pb) ? compareIP(pa, pb) : a.localeCompare(b); });
   let html = '<label><input type="checkbox" id="alertSubnetAll" checked onchange="toggleAlertSubnetsAll(this.checked)"> ' + esc(t('alert_subnets_all')) + '</label>';
   for (const s of subnets) {
     html += '<label><input type="checkbox" class="alert-subnet-cb" value="' + escAttr(s) + '" checked onchange="updateAlertSubnetAll()"> ' + esc(s) + '</label>';

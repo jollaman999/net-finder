@@ -258,9 +258,15 @@ func (s *Scanner) setProgress(phase string, percent, count int) {
 func (s *Scanner) GetStatus() map[string]interface{} {
 	s.state.mu.RLock()
 	defer s.state.mu.RUnlock()
+	subnetStrs := make([]string, len(s.subnets))
+	for i, sn := range s.subnets {
+		subnetStrs[i] = sn.String()
+	}
+	sortCIDRStrings(subnetStrs)
 	return map[string]interface{}{
 		"status":   s.state.Status,
 		"progress": s.state.Progress,
+		"subnets":  subnetStrs,
 	}
 }
 
