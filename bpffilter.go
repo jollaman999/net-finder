@@ -27,10 +27,10 @@ func bpfFilterDHCP() []bpf.RawInstruction {
 	instrs, _ := bpf.Assemble([]bpf.Instruction{
 		// Check EtherType == IPv4
 		bpf.LoadAbsolute{Off: offEtherType, Size: 2},
-		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x0800, SkipTrue: 0, SkipFalse: 12},
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x0800, SkipTrue: 0, SkipFalse: 10},
 		// Check IP protocol == UDP (17)
 		bpf.LoadAbsolute{Off: offIPProto, Size: 1},
-		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 17, SkipTrue: 0, SkipFalse: 10},
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 17, SkipTrue: 0, SkipFalse: 8},
 		// Load IP header length (IHL) to X
 		bpf.LoadMemShift{Off: 14},
 		// Load UDP src port (at 14 + IHL + 0)
@@ -54,9 +54,9 @@ func bpfFilterDHCP() []bpf.RawInstruction {
 func bpfFilterHSRP() []bpf.RawInstruction {
 	instrs, _ := bpf.Assemble([]bpf.Instruction{
 		bpf.LoadAbsolute{Off: offEtherType, Size: 2},
-		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x0800, SkipTrue: 0, SkipFalse: 5},
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x0800, SkipTrue: 0, SkipFalse: 6},
 		bpf.LoadAbsolute{Off: offIPProto, Size: 1},
-		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 17, SkipTrue: 0, SkipFalse: 3},
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 17, SkipTrue: 0, SkipFalse: 4},
 		bpf.LoadMemShift{Off: 14},
 		bpf.LoadIndirect{Off: 16, Size: 2}, // dst port
 		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 1985, SkipTrue: 0, SkipFalse: 1},
@@ -71,7 +71,7 @@ func bpfFilterHSRP() []bpf.RawInstruction {
 func bpfFilterVRRP() []bpf.RawInstruction {
 	instrs, _ := bpf.Assemble([]bpf.Instruction{
 		bpf.LoadAbsolute{Off: offEtherType, Size: 2},
-		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x0800, SkipTrue: 0, SkipFalse: 2},
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x0800, SkipTrue: 0, SkipFalse: 3},
 		bpf.LoadAbsolute{Off: offIPProto, Size: 1},
 		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 112, SkipTrue: 0, SkipFalse: 1},
 		bpf.RetConstant{Val: 65536},
@@ -96,7 +96,7 @@ func bpfFilterCDP() []bpf.RawInstruction {
 	instrs, _ := bpf.Assemble([]bpf.Instruction{
 		// Check first 4 bytes of dst MAC: 01:00:0c:cc
 		bpf.LoadAbsolute{Off: offDstMAC, Size: 4},
-		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x01000ccc, SkipTrue: 0, SkipFalse: 2},
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x01000ccc, SkipTrue: 0, SkipFalse: 3},
 		// Check last 2 bytes of dst MAC: cc:cc
 		bpf.LoadAbsolute{Off: offDstMAC + 4, Size: 2},
 		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0xcccc, SkipTrue: 0, SkipFalse: 1},
