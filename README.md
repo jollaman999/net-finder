@@ -35,11 +35,7 @@ No external C libraries are needed. Net Finder uses Linux AF_PACKET raw sockets 
 make build
 ```
 
-For an explicitly static build with CGo disabled:
-
-```bash
-CGO_ENABLED=0 make build
-```
+`CGO_ENABLED=0` is set by default in the Makefile, producing a fully static binary.
 
 Other targets:
 

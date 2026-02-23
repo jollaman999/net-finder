@@ -1,5 +1,5 @@
 BINARY    := net-finder
-GO        := go
+GO        := CGO_ENABLED=0 go
 GOFLAGS   :=
 PREFIX    := /usr/local/bin
 

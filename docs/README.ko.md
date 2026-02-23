@@ -33,11 +33,7 @@
 make build
 ```
 
-CGo를 비활성화한 명시적 정적 빌드:
-
-```bash
-CGO_ENABLED=0 make build
-```
+Makefile에 `CGO_ENABLED=0`이 기본 설정되어 있어, 완전 정적 바이너리가 생성됩니다.
 
 기타 타겟:
 
