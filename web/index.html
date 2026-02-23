@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Net Finder - 네트워크 스캐너</title>
+<title>Net Finder - Network Scanner</title>
 <style>
 :root {
   --bg: #f5f5f5;
@@ -81,6 +81,17 @@ header h1 span { color: var(--primary); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-primary { background: var(--primary); color: #fff; }
 .btn-danger { background: var(--danger); color: #fff; }
+.lang-select {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+}
+.lang-select:hover { border-color: var(--primary); }
 .theme-toggle {
   display: flex;
   align-items: center;
@@ -311,14 +322,18 @@ tr.subnet-header:hover { background: var(--primary-light); }
 </head>
 <body>
 <header>
-  <h1><span>Net Finder</span> 네트워크 스캐너</h1>
+  <h1><span>Net Finder</span> <span data-i18n="title_suffix">Network Scanner</span></h1>
   <div class="header-controls">
-    <button id="btnScan" class="btn btn-primary" onclick="startScan()">스캔 시작</button>
-    <button id="btnStop" class="btn btn-danger" onclick="stopScan()" disabled>스캔 중지</button>
+    <button id="btnScan" class="btn btn-primary" onclick="startScan()" data-i18n="btn_scan">Start Scan</button>
+    <button id="btnStop" class="btn btn-danger" onclick="stopScan()" disabled data-i18n="btn_stop">Stop Scan</button>
+    <select id="langSelect" class="lang-select" onchange="setLanguage(this.value)">
+      <option value="en">EN</option>
+      <option value="ko">KO</option>
+    </select>
     <label class="theme-toggle">
       <input type="checkbox" id="themeSwitch" onchange="toggleTheme()">
       <span class="toggle-track"></span>
-      다크모드
+      <span data-i18n="dark_mode">Dark</span>
     </label>
   </div>
 </header>
@@ -326,7 +341,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
 <div class="container">
   <div class="progress-section">
     <div class="progress-text">
-      <span><span class="status-badge status-idle" id="statusBadge">대기</span> <span id="progressDesc"></span></span>
+      <span><span class="status-badge status-idle" id="statusBadge" data-i18n="status_idle">Idle</span> <span id="progressDesc"></span></span>
       <span id="progressPercent">0%</span>
     </div>
     <div class="progress-bar-container">
@@ -335,52 +350,52 @@ tr.subnet-header:hover { background: var(--primary-light); }
   </div>
 
   <div class="tabs" id="tabBar">
-    <button class="tab active" data-tab="hosts" onclick="switchTab('hosts')">호스트 목록 <span class="badge badge-info" id="badge-hosts" style="display:none">0</span></button>
-    <button class="tab" data-tab="conflicts" onclick="switchTab('conflicts')">IP 충돌 <span class="badge badge-danger" id="badge-conflicts" style="display:none">0</span></button>
-    <button class="tab" data-tab="dhcp" onclick="switchTab('dhcp')">DHCP 서버 <span class="badge badge-info" id="badge-dhcp" style="display:none">0</span></button>
+    <button class="tab active" data-tab="hosts" onclick="switchTab('hosts')"><span data-i18n="tab_hosts">Hosts</span> <span class="badge badge-info" id="badge-hosts" style="display:none">0</span></button>
+    <button class="tab" data-tab="conflicts" onclick="switchTab('conflicts')"><span data-i18n="tab_conflicts">IP Conflicts</span> <span class="badge badge-danger" id="badge-conflicts" style="display:none">0</span></button>
+    <button class="tab" data-tab="dhcp" onclick="switchTab('dhcp')"><span data-i18n="tab_dhcp">DHCP Servers</span> <span class="badge badge-info" id="badge-dhcp" style="display:none">0</span></button>
     <button class="tab" data-tab="protocols" onclick="switchTab('protocols')">HSRP/VRRP</button>
     <button class="tab" data-tab="discovery" onclick="switchTab('discovery')">LLDP/CDP</button>
-    <button class="tab" data-tab="security" onclick="switchTab('security')">보안 <span class="badge badge-danger" id="badge-security" style="display:none">0</span></button>
+    <button class="tab" data-tab="security" onclick="switchTab('security')"><span data-i18n="tab_security">Security</span> <span class="badge badge-danger" id="badge-security" style="display:none">0</span></button>
   </div>
 
   <div class="tab-content">
     <!-- Hosts Panel -->
     <div class="panel active" id="panel-hosts">
-      <input type="text" class="search-box" placeholder="검색 (IP, 호스트명, MAC, 벤더...)" oninput="filterTable('hosts-table', this.value)">
+      <input type="text" class="search-box" data-i18n-placeholder="search_hosts" placeholder="Search (IP, hostname, MAC, vendor...)" oninput="filterTable('hosts-table', this.value)">
       <div style="overflow-x:auto">
       <table id="hosts-table">
         <thead>
           <tr>
             <th onclick="sortTable('hosts-table',0)">#<span class="sort-arrow"></span></th>
             <th onclick="sortTable('hosts-table',1)">IP<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('hosts-table',2)">호스트명<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hosts-table',2)" data-i18n="th_hostname">Hostname<span class="sort-arrow"></span></th>
             <th onclick="sortTable('hosts-table',3)">MAC<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('hosts-table',4)">벤더<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hosts-table',4)" data-i18n="th_vendor">Vendor<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
       </div>
-      <div class="empty-state" id="empty-hosts"><p>스캔을 시작하면 발견된 호스트가 여기에 표시됩니다.</p></div>
+      <div class="empty-state" id="empty-hosts"><p data-i18n="empty_hosts">Discovered hosts will appear here once scanning starts.</p></div>
     </div>
 
     <!-- Conflicts Panel -->
     <div class="panel" id="panel-conflicts">
-      <input type="text" class="search-box" placeholder="검색..." oninput="filterTable('conflicts-table', this.value)">
+      <input type="text" class="search-box" data-i18n-placeholder="search_generic" placeholder="Search..." oninput="filterTable('conflicts-table', this.value)">
       <div style="overflow-x:auto">
       <table id="conflicts-table">
         <thead>
           <tr>
             <th onclick="sortTable('conflicts-table',0)">IP<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('conflicts-table',1)">호스트명<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('conflicts-table',2)">MAC 주소<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('conflicts-table',3)">벤더<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('conflicts-table',1)" data-i18n="th_hostname">Hostname<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('conflicts-table',2)" data-i18n="th_mac_addr">MAC Address<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('conflicts-table',3)" data-i18n="th_vendor">Vendor<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
       </div>
-      <div class="empty-state" id="empty-conflicts"><p>IP 충돌이 감지되지 않았습니다.</p></div>
+      <div class="empty-state" id="empty-conflicts"><p data-i18n="empty_conflicts">No IP conflicts detected.</p></div>
     </div>
 
     <!-- DHCP Panel -->
@@ -389,20 +404,20 @@ tr.subnet-header:hover { background: var(--primary-light); }
       <table id="dhcp-table">
         <thead>
           <tr>
-            <th onclick="sortTable('dhcp-table',0)">서버 IP<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('dhcp-table',1)">서버 MAC<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('dhcp-table',2)">벤더<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('dhcp-table',3)">제공 IP<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('dhcp-table',4)">서브넷<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('dhcp-table',5)">게이트웨이<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcp-table',0)" data-i18n="th_server_ip">Server IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcp-table',1)" data-i18n="th_server_mac">Server MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcp-table',2)" data-i18n="th_vendor">Vendor<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcp-table',3)" data-i18n="th_offered_ip">Offered IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcp-table',4)" data-i18n="th_subnet">Subnet<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcp-table',5)" data-i18n="th_gateway">Gateway<span class="sort-arrow"></span></th>
             <th onclick="sortTable('dhcp-table',6)">DNS<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('dhcp-table',7)">임대시간<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcp-table',7)" data-i18n="th_lease">Lease Time<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
       </div>
-      <div class="empty-state" id="empty-dhcp"><p>DHCP 서버가 감지되지 않았습니다.</p></div>
+      <div class="empty-state" id="empty-dhcp"><p data-i18n="empty_dhcp">No DHCP servers detected.</p></div>
     </div>
 
     <!-- HSRP/VRRP Panel -->
@@ -412,126 +427,318 @@ tr.subnet-header:hover { background: var(--primary-light); }
       <table id="hsrp-table">
         <thead>
           <tr>
-            <th onclick="sortTable('hsrp-table',0)">버전<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('hsrp-table',1)">그룹<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('hsrp-table',2)">상태<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('hsrp-table',3)">우선순위<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('hsrp-table',4)">가상 IP<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('hsrp-table',5)">소스 IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hsrp-table',0)" data-i18n="th_version">Version<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hsrp-table',1)" data-i18n="th_group">Group<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hsrp-table',2)" data-i18n="th_state">State<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hsrp-table',3)" data-i18n="th_priority">Priority<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hsrp-table',4)" data-i18n="th_virtual_ip">Virtual IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hsrp-table',5)" data-i18n="th_source_ip">Source IP<span class="sort-arrow"></span></th>
             <th onclick="sortTable('hsrp-table',6)">Hello/Hold<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('hsrp-table',7)">시간<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hsrp-table',7)" data-i18n="th_time">Time<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
       </div>
-      <div class="empty-state" id="empty-hsrp"><p>HSRP 패킷이 감지되지 않았습니다.</p></div>
+      <div class="empty-state" id="empty-hsrp"><p data-i18n="empty_hsrp">No HSRP packets detected.</p></div>
 
       <h3 style="margin:24px 0 12px">VRRP</h3>
       <div style="overflow-x:auto">
       <table id="vrrp-table">
         <thead>
           <tr>
-            <th onclick="sortTable('vrrp-table',0)">버전<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('vrrp-table',1)">라우터 ID<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('vrrp-table',2)">우선순위<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('vrrp-table',3)">가상 IP<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('vrrp-table',4)">소스 IP<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('vrrp-table',5)">광고 간격<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('vrrp-table',6)">시간<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('vrrp-table',0)" data-i18n="th_version">Version<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('vrrp-table',1)" data-i18n="th_router_id">Router ID<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('vrrp-table',2)" data-i18n="th_priority">Priority<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('vrrp-table',3)" data-i18n="th_virtual_ip">Virtual IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('vrrp-table',4)" data-i18n="th_source_ip">Source IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('vrrp-table',5)" data-i18n="th_adver_int">Adver Int<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('vrrp-table',6)" data-i18n="th_time">Time<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
       </div>
-      <div class="empty-state" id="empty-vrrp"><p>VRRP 패킷이 감지되지 않았습니다.</p></div>
+      <div class="empty-state" id="empty-vrrp"><p data-i18n="empty_vrrp">No VRRP packets detected.</p></div>
     </div>
 
     <!-- LLDP/CDP Panel -->
     <div class="panel" id="panel-discovery">
-      <h3 style="margin-bottom:12px">LLDP 이웃</h3>
+      <h3 style="margin-bottom:12px" data-i18n="h_lldp">LLDP Neighbors</h3>
       <div style="overflow-x:auto">
       <table id="lldp-table">
         <thead>
           <tr>
             <th onclick="sortTable('lldp-table',0)">Chassis ID<span class="sort-arrow"></span></th>
             <th onclick="sortTable('lldp-table',1)">Port ID<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('lldp-table',2)">시스템 이름<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('lldp-table',3)">시스템 설명<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('lldp-table',4)">관리 주소<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('lldp-table',5)">소스 MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('lldp-table',2)" data-i18n="th_sys_name">System Name<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('lldp-table',3)" data-i18n="th_sys_desc">System Desc<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('lldp-table',4)" data-i18n="th_mgmt_addr">Mgmt Address<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('lldp-table',5)" data-i18n="th_source_mac">Source MAC<span class="sort-arrow"></span></th>
             <th onclick="sortTable('lldp-table',6)">TTL<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('lldp-table',7)">시간<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('lldp-table',7)" data-i18n="th_time">Time<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
       </div>
-      <div class="empty-state" id="empty-lldp"><p>LLDP 이웃이 감지되지 않았습니다.</p></div>
+      <div class="empty-state" id="empty-lldp"><p data-i18n="empty_lldp">No LLDP neighbors detected.</p></div>
 
-      <h3 style="margin:24px 0 12px">CDP 이웃</h3>
+      <h3 style="margin:24px 0 12px" data-i18n="h_cdp">CDP Neighbors</h3>
       <div style="overflow-x:auto">
       <table id="cdp-table">
         <thead>
           <tr>
-            <th onclick="sortTable('cdp-table',0)">장치 ID<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('cdp-table',1)">주소<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('cdp-table',2)">소스 MAC<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('cdp-table',3)">포트 ID<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('cdp-table',4)">플랫폼<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('cdp-table',5)">버전<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',0)" data-i18n="th_device_id">Device ID<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',1)" data-i18n="th_address">Address<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',2)" data-i18n="th_source_mac">Source MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',3)">Port ID<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',4)" data-i18n="th_platform">Platform<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',5)" data-i18n="th_version">Version<span class="sort-arrow"></span></th>
             <th onclick="sortTable('cdp-table',6)">Native VLAN<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('cdp-table',7)">시간<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('cdp-table',7)" data-i18n="th_time">Time<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
       </div>
-      <div class="empty-state" id="empty-cdp"><p>CDP 이웃이 감지되지 않았습니다.</p></div>
+      <div class="empty-state" id="empty-cdp"><p data-i18n="empty_cdp">No CDP neighbors detected.</p></div>
     </div>
 
     <!-- Security Panel -->
     <div class="panel" id="panel-security">
-      <h3 style="margin-bottom:12px">ARP 스푸핑 알림</h3>
+      <h3 style="margin-bottom:12px" data-i18n="h_arp_alerts">ARP Spoofing Alerts</h3>
       <div style="overflow-x:auto">
       <table id="arp-alert-table">
         <thead>
           <tr>
-            <th onclick="sortTable('arp-alert-table',0)">심각도<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',1)">대상 IP<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',2)">알려진 MAC<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',3)">공격 MAC<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',4)">패킷 수<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',5)">최초 감지<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',6)">마지막 감지<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',0)" data-i18n="th_severity">Severity<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',1)" data-i18n="th_target_ip">Target IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',2)" data-i18n="th_known_mac">Known MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',3)" data-i18n="th_attack_mac">Attacker MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',4)" data-i18n="th_packets">Packets<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',5)" data-i18n="th_first_seen">First Seen<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',6)" data-i18n="th_last_seen">Last Seen<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
       </div>
-      <div class="empty-state" id="empty-arp-alert"><p>ARP 스푸핑 알림이 없습니다.</p></div>
+      <div class="empty-state" id="empty-arp-alert"><p data-i18n="empty_arp">No ARP spoofing alerts.</p></div>
 
-      <h3 style="margin:24px 0 12px">DNS 스푸핑 알림</h3>
+      <h3 style="margin:24px 0 12px" data-i18n="h_dns_alerts">DNS Spoofing Alerts</h3>
       <div style="overflow-x:auto">
       <table id="dns-alert-table">
         <thead>
           <tr>
-            <th onclick="sortTable('dns-alert-table',0)">심각도<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('dns-alert-table',1)">유형<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('dns-alert-table',2)">도메인<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('dns-alert-table',3)">메시지<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('dns-alert-table',4)">시간<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dns-alert-table',0)" data-i18n="th_severity">Severity<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dns-alert-table',1)" data-i18n="th_type">Type<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dns-alert-table',2)" data-i18n="th_domain">Domain<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dns-alert-table',3)" data-i18n="th_message">Message<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dns-alert-table',4)" data-i18n="th_time">Time<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
       </div>
-      <div class="empty-state" id="empty-dns-alert"><p>DNS 스푸핑 알림이 없습니다.</p></div>
+      <div class="empty-state" id="empty-dns-alert"><p data-i18n="empty_dns">No DNS spoofing alerts.</p></div>
     </div>
   </div>
 </div>
 
 <script>
+// ── i18n ──
+const i18n = {
+  en: {
+    title: 'Net Finder - Network Scanner',
+    title_suffix: 'Network Scanner',
+    btn_scan: 'Start Scan',
+    btn_stop: 'Stop Scan',
+    dark_mode: 'Dark',
+    status_idle: 'Idle',
+    status_running: 'Scanning',
+    status_done: 'Done',
+    tab_hosts: 'Hosts',
+    tab_conflicts: 'IP Conflicts',
+    tab_dhcp: 'DHCP Servers',
+    tab_security: 'Security',
+    search_hosts: 'Search (IP, hostname, MAC, vendor...)',
+    search_generic: 'Search...',
+    th_hostname: 'Hostname',
+    th_vendor: 'Vendor',
+    th_mac_addr: 'MAC Address',
+    th_server_ip: 'Server IP',
+    th_server_mac: 'Server MAC',
+    th_offered_ip: 'Offered IP',
+    th_subnet: 'Subnet',
+    th_gateway: 'Gateway',
+    th_lease: 'Lease Time',
+    th_version: 'Version',
+    th_group: 'Group',
+    th_state: 'State',
+    th_priority: 'Priority',
+    th_virtual_ip: 'Virtual IP',
+    th_source_ip: 'Source IP',
+    th_time: 'Time',
+    th_router_id: 'Router ID',
+    th_adver_int: 'Adver Int',
+    th_sys_name: 'System Name',
+    th_sys_desc: 'System Desc',
+    th_mgmt_addr: 'Mgmt Address',
+    th_source_mac: 'Source MAC',
+    th_device_id: 'Device ID',
+    th_address: 'Address',
+    th_platform: 'Platform',
+    th_severity: 'Severity',
+    th_target_ip: 'Target IP',
+    th_known_mac: 'Known MAC',
+    th_attack_mac: 'Attacker MAC',
+    th_packets: 'Packets',
+    th_first_seen: 'First Seen',
+    th_last_seen: 'Last Seen',
+    th_type: 'Type',
+    th_domain: 'Domain',
+    th_message: 'Message',
+    h_lldp: 'LLDP Neighbors',
+    h_cdp: 'CDP Neighbors',
+    h_arp_alerts: 'ARP Spoofing Alerts',
+    h_dns_alerts: 'DNS Spoofing Alerts',
+    empty_hosts: 'Discovered hosts will appear here once scanning starts.',
+    empty_conflicts: 'No IP conflicts detected.',
+    empty_dhcp: 'No DHCP servers detected.',
+    empty_hsrp: 'No HSRP packets detected.',
+    empty_vrrp: 'No VRRP packets detected.',
+    empty_lldp: 'No LLDP neighbors detected.',
+    empty_cdp: 'No CDP neighbors detected.',
+    empty_arp: 'No ARP spoofing alerts.',
+    empty_dns: 'No DNS spoofing alerts.',
+    hosts_count: ' hosts',
+    items_count: ' items',
+    other_group: '(Other)',
+    lease_sec: 's',
+    lease_min: 'm',
+    lease_hour: 'h ',
+    lease_day: 'd',
+    prog_oui_loading: 'Loading OUI database...',
+    prog_oui_done: 'OUI loaded ({0} vendors)',
+    prog_scan_parallel: 'Parallel scanning (ARP, DHCP, HSRP/VRRP/LLDP/CDP)...',
+    prog_scan_arp_done: 'ARP done ({0} hosts), resolving hostnames...',
+    prog_scan_done: 'Scan complete',
+  },
+  ko: {
+    title: 'Net Finder - 네트워크 스캐너',
+    title_suffix: '네트워크 스캐너',
+    btn_scan: '스캔 시작',
+    btn_stop: '스캔 중지',
+    dark_mode: '다크모드',
+    status_idle: '대기',
+    status_running: '스캔 중',
+    status_done: '완료',
+    tab_hosts: '호스트 목록',
+    tab_conflicts: 'IP 충돌',
+    tab_dhcp: 'DHCP 서버',
+    tab_security: '보안',
+    search_hosts: '검색 (IP, 호스트명, MAC, 벤더...)',
+    search_generic: '검색...',
+    th_hostname: '호스트명',
+    th_vendor: '벤더',
+    th_mac_addr: 'MAC 주소',
+    th_server_ip: '서버 IP',
+    th_server_mac: '서버 MAC',
+    th_offered_ip: '제공 IP',
+    th_subnet: '서브넷',
+    th_gateway: '게이트웨이',
+    th_lease: '임대시간',
+    th_version: '버전',
+    th_group: '그룹',
+    th_state: '상태',
+    th_priority: '우선순위',
+    th_virtual_ip: '가상 IP',
+    th_source_ip: '소스 IP',
+    th_time: '시간',
+    th_router_id: '라우터 ID',
+    th_adver_int: '광고 간격',
+    th_sys_name: '시스템 이름',
+    th_sys_desc: '시스템 설명',
+    th_mgmt_addr: '관리 주소',
+    th_source_mac: '소스 MAC',
+    th_device_id: '장치 ID',
+    th_address: '주소',
+    th_platform: '플랫폼',
+    th_severity: '심각도',
+    th_target_ip: '대상 IP',
+    th_known_mac: '알려진 MAC',
+    th_attack_mac: '공격 MAC',
+    th_packets: '패킷 수',
+    th_first_seen: '최초 감지',
+    th_last_seen: '마지막 감지',
+    th_type: '유형',
+    th_domain: '도메인',
+    th_message: '메시지',
+    h_lldp: 'LLDP 이웃',
+    h_cdp: 'CDP 이웃',
+    h_arp_alerts: 'ARP 스푸핑 알림',
+    h_dns_alerts: 'DNS 스푸핑 알림',
+    empty_hosts: '스캔을 시작하면 발견된 호스트가 여기에 표시됩니다.',
+    empty_conflicts: 'IP 충돌이 감지되지 않았습니다.',
+    empty_dhcp: 'DHCP 서버가 감지되지 않았습니다.',
+    empty_hsrp: 'HSRP 패킷이 감지되지 않았습니다.',
+    empty_vrrp: 'VRRP 패킷이 감지되지 않았습니다.',
+    empty_lldp: 'LLDP 이웃이 감지되지 않았습니다.',
+    empty_cdp: 'CDP 이웃이 감지되지 않았습니다.',
+    empty_arp: 'ARP 스푸핑 알림이 없습니다.',
+    empty_dns: 'DNS 스푸핑 알림이 없습니다.',
+    hosts_count: '개 호스트',
+    items_count: '건',
+    other_group: '(기타)',
+    lease_sec: '초',
+    lease_min: '분',
+    lease_hour: '시간 ',
+    lease_day: '일',
+  }
+};
+
+let currentLang = 'en';
+
+function t(key) {
+  return (i18n[currentLang] && i18n[currentLang][key]) || i18n.en[key] || key;
+}
+
+function setLanguage(lang) {
+  currentLang = lang;
+  localStorage.setItem('lang', lang);
+  document.documentElement.lang = lang;
+  document.getElementById('langSelect').value = lang;
+  applyLanguage();
+}
+
+function applyLanguage() {
+  document.title = t('title');
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    const arrow = el.querySelector('.sort-arrow');
+    el.textContent = t(key);
+    if (arrow) el.appendChild(arrow);
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    el.placeholder = t(el.getAttribute('data-i18n-placeholder'));
+  });
+  // Re-render dynamic content
+  if (rawHosts.length > 0 || rawConflicts.length > 0) {
+    renderHostsTable();
+    renderConflictsTable();
+  }
+}
+
+function initLanguage() {
+  const saved = localStorage.getItem('lang');
+  if (saved && i18n[saved]) {
+    currentLang = saved;
+  }
+  document.getElementById('langSelect').value = currentLang;
+  applyLanguage();
+}
+
 // ── State ──
 let currentTab = 'hosts';
 let pollTimer = null;
@@ -648,8 +855,7 @@ function updateStatus(data) {
   const desc = document.getElementById('progressDesc');
   const pct = document.getElementById('progressPercent');
   badge.className = 'status-badge status-' + data.status;
-  const labels = { idle: '대기', running: '스캔 중', done: '완료' };
-  badge.textContent = labels[data.status] || data.status;
+  badge.textContent = t('status_' + data.status) || data.status;
   const p = data.progress || {};
   bar.style.width = (p.percent || 0) + '%';
   desc.textContent = p.description || '';
@@ -674,7 +880,7 @@ function setBadge(id, count) {
 function groupBySubnet(items) {
   const groups = {}, order = [];
   items.forEach(item => {
-    const key = item.subnet || '(기타)';
+    const key = item.subnet || t('other_group');
     if (!groups[key]) { groups[key] = []; order.push(key); }
     groups[key].push(item);
   });
@@ -721,7 +927,7 @@ function renderHostsTable() {
     const isCollapsed = collapsed.hosts.has(subnet);
     const arrow = isCollapsed ? '\u25B6' : '\u25BC';
     const shown = filter ? filtered.length : items.length;
-    html += `<tr class="subnet-header" onclick="toggleSubnet('hosts','${escAttr(subnet)}')"><td colspan="${cols}"><span class="collapse-arrow">${arrow}</span> ${esc(subnet)}<span class="subnet-count">${shown}개 호스트</span></td></tr>`;
+    html += `<tr class="subnet-header" onclick="toggleSubnet('hosts','${escAttr(subnet)}')"><td colspan="${cols}"><span class="collapse-arrow">${arrow}</span> ${esc(subnet)}<span class="subnet-count">${shown}${t('hosts_count')}</span></td></tr>`;
 
     if (!isCollapsed) {
       for (const h of filtered) {
@@ -784,7 +990,7 @@ function renderConflictsTable() {
 
     const isCollapsed = collapsed.conflicts.has(subnet);
     const arrow = isCollapsed ? '\u25B6' : '\u25BC';
-    html += `<tr class="subnet-header" onclick="toggleSubnet('conflicts','${escAttr(subnet)}')"><td colspan="${cols}"><span class="collapse-arrow">${arrow}</span> ${esc(subnet)}<span class="subnet-count">${filtered.length}건</span></td></tr>`;
+    html += `<tr class="subnet-header" onclick="toggleSubnet('conflicts','${escAttr(subnet)}')"><td colspan="${cols}"><span class="collapse-arrow">${arrow}</span> ${esc(subnet)}<span class="subnet-count">${filtered.length}${t('items_count')}</span></td></tr>`;
 
     if (!isCollapsed) {
       for (const c of filtered) {
@@ -873,10 +1079,10 @@ function escAttr(s) {
 }
 function formatLease(seconds) {
   if (!seconds) return '-';
-  if (seconds < 60) return seconds + '초';
-  if (seconds < 3600) return Math.floor(seconds/60) + '분';
-  if (seconds < 86400) return Math.floor(seconds/3600) + '시간 ' + Math.floor((seconds%3600)/60) + '분';
-  return Math.floor(seconds/86400) + '일';
+  if (seconds < 60) return seconds + t('lease_sec');
+  if (seconds < 3600) return Math.floor(seconds/60) + t('lease_min');
+  if (seconds < 86400) return Math.floor(seconds/3600) + t('lease_hour') + Math.floor((seconds%3600)/60) + t('lease_min');
+  return Math.floor(seconds/86400) + t('lease_day');
 }
 function isIP(s) { return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/.test(s); }
 function compareIP(a, b) {
@@ -956,6 +1162,7 @@ function filterTable(tableId, query) {
 
 // ── Init ──
 initTheme();
+initLanguage();
 pollData();
 pollTimer = setInterval(pollData, 2000);
 </script>
