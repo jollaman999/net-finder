@@ -47,8 +47,8 @@ make vet         # go vet 실행
 ## 설치
 
 ```bash
-sudo make install    # /usr/local/bin에 설치
-sudo make uninstall  # /usr/local/bin에서 제거
+make install    # /usr/local/bin에 설치
+make uninstall  # /usr/local/bin에서 제거
 ```
 
 ## 사용법

@@ -49,8 +49,8 @@ make vet         # Run go vet
 ## Install
 
 ```bash
-sudo make install    # Install to /usr/local/bin
-sudo make uninstall  # Remove from /usr/local/bin
+make install    # Install to /usr/local/bin
+make uninstall  # Remove from /usr/local/bin
 ```
 
 ## Usage
