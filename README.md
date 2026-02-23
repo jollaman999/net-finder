@@ -1,5 +1,7 @@
 # Net Finder
 
+[한국어 문서](docs/README.ko.md)
+
 A real-time network scanner and monitoring dashboard with a built-in web UI. Net Finder discovers hosts on your local network, detects network infrastructure, and monitors for security threats — all from a single static binary.
 
 ## Features
