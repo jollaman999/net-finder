@@ -612,8 +612,10 @@ const i18n = {
     empty_cdp: 'No CDP neighbors detected.',
     empty_arp: 'No ARP spoofing alerts.',
     empty_dns: 'No DNS spoofing alerts.',
-    hosts_count: ' hosts',
-    items_count: ' items',
+    hosts_count_one: ' host',
+    hosts_count_other: ' hosts',
+    items_count_one: ' item',
+    items_count_other: ' items',
     other_group: '(Other)',
     lease_sec: 's',
     lease_min: 'm',
@@ -688,13 +690,20 @@ const i18n = {
     empty_cdp: 'CDP 이웃이 감지되지 않았습니다.',
     empty_arp: 'ARP 스푸핑 알림이 없습니다.',
     empty_dns: 'DNS 스푸핑 알림이 없습니다.',
-    hosts_count: '개 호스트',
-    items_count: '건',
+    hosts_count_one: '개 호스트',
+    hosts_count_other: '개 호스트',
+    items_count_one: '건',
+    items_count_other: '건',
     other_group: '(기타)',
     lease_sec: '초',
     lease_min: '분',
     lease_hour: '시간 ',
     lease_day: '일',
+    prog_oui_loading: 'OUI 데이터베이스 로드 중...',
+    prog_oui_done: 'OUI 로드 완료 ({0}개 벤더)',
+    prog_scan_parallel: '병렬 스캔 중 (ARP, DHCP, HSRP/VRRP/LLDP/CDP)...',
+    prog_scan_arp_done: 'ARP 완료 ({0}개 호스트), 호스트명 해석 중...',
+    prog_scan_done: '스캔 완료',
   }
 };
 
@@ -702,6 +711,11 @@ let currentLang = 'en';
 
 function t(key) {
   return (i18n[currentLang] && i18n[currentLang][key]) || i18n.en[key] || key;
+}
+
+function tp(key, count) {
+  const suffix = count === 1 ? '_one' : '_other';
+  return t(key + suffix);
 }
 
 function setLanguage(lang) {
@@ -849,6 +863,14 @@ async function pollData() {
   } catch(e) { console.error('Poll error:', e); }
 }
 
+function progressMessage(p) {
+  if (!p || !p.phase) return '';
+  const key = 'prog_' + p.phase;
+  const tmpl = t(key);
+  if (tmpl === key) return p.phase;
+  return tmpl.replace('{0}', p.count || 0);
+}
+
 function updateStatus(data) {
   const badge = document.getElementById('statusBadge');
   const bar = document.getElementById('progressBar');
@@ -858,7 +880,7 @@ function updateStatus(data) {
   badge.textContent = t('status_' + data.status) || data.status;
   const p = data.progress || {};
   bar.style.width = (p.percent || 0) + '%';
-  desc.textContent = p.description || '';
+  desc.textContent = progressMessage(p);
   pct.textContent = (p.percent || 0) + '%';
   document.getElementById('btnScan').disabled = data.status === 'running';
   document.getElementById('btnStop').disabled = data.status !== 'running';
@@ -927,7 +949,7 @@ function renderHostsTable() {
     const isCollapsed = collapsed.hosts.has(subnet);
     const arrow = isCollapsed ? '\u25B6' : '\u25BC';
     const shown = filter ? filtered.length : items.length;
-    html += `<tr class="subnet-header" onclick="toggleSubnet('hosts','${escAttr(subnet)}')"><td colspan="${cols}"><span class="collapse-arrow">${arrow}</span> ${esc(subnet)}<span class="subnet-count">${shown}${t('hosts_count')}</span></td></tr>`;
+    html += `<tr class="subnet-header" onclick="toggleSubnet('hosts','${escAttr(subnet)}')"><td colspan="${cols}"><span class="collapse-arrow">${arrow}</span> ${esc(subnet)}<span class="subnet-count">${shown}${tp('hosts_count', shown)}</span></td></tr>`;
 
     if (!isCollapsed) {
       for (const h of filtered) {
@@ -990,7 +1012,7 @@ function renderConflictsTable() {
 
     const isCollapsed = collapsed.conflicts.has(subnet);
     const arrow = isCollapsed ? '\u25B6' : '\u25BC';
-    html += `<tr class="subnet-header" onclick="toggleSubnet('conflicts','${escAttr(subnet)}')"><td colspan="${cols}"><span class="collapse-arrow">${arrow}</span> ${esc(subnet)}<span class="subnet-count">${filtered.length}${t('items_count')}</span></td></tr>`;
+    html += `<tr class="subnet-header" onclick="toggleSubnet('conflicts','${escAttr(subnet)}')"><td colspan="${cols}"><span class="collapse-arrow">${arrow}</span> ${esc(subnet)}<span class="subnet-count">${filtered.length}${tp('items_count', filtered.length)}</span></td></tr>`;
 
     if (!isCollapsed) {
       for (const c of filtered) {
