@@ -268,7 +268,7 @@ func buildHTMLReport(subnet string, conflicts []ConflictEntry) string {
 
 	var b strings.Builder
 	b.WriteString(`<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f5f5">`)
-	b.WriteString(`<div style="max-width:640px;margin:20px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1)">`)
+	b.WriteString(`<div style="max-width:800px;margin:20px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1)">`)
 
 	// Header
 	b.WriteString(`<div style="background:#d32f2f;color:#fff;padding:20px 24px">`)
@@ -279,12 +279,12 @@ func buildHTMLReport(subnet string, conflicts []ConflictEntry) string {
 
 	// Table
 	b.WriteString(`<div style="padding:16px 24px">`)
-	b.WriteString(`<table style="width:100%;border-collapse:collapse;font-size:13px">`)
+	b.WriteString(`<table style="width:100%;border-collapse:collapse;font-size:14px">`)
 	b.WriteString(`<thead><tr style="background:#f5f5f5">`)
-	b.WriteString(`<th style="padding:10px 12px;text-align:left;border-bottom:2px solid #d32f2f;font-weight:600">IP</th>`)
-	b.WriteString(`<th style="padding:10px 12px;text-align:left;border-bottom:2px solid #d32f2f;font-weight:600">Hostname</th>`)
-	b.WriteString(`<th style="padding:10px 12px;text-align:left;border-bottom:2px solid #d32f2f;font-weight:600">MAC Address</th>`)
-	b.WriteString(`<th style="padding:10px 12px;text-align:left;border-bottom:2px solid #d32f2f;font-weight:600">Vendor</th>`)
+	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #d32f2f;font-weight:600;white-space:nowrap">IP</th>`)
+	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #d32f2f;font-weight:600;white-space:nowrap">Hostname</th>`)
+	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #d32f2f;font-weight:600;white-space:nowrap">MAC Address</th>`)
+	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #d32f2f;font-weight:600;white-space:nowrap">Vendor</th>`)
 	b.WriteString(`</tr></thead><tbody>`)
 
 	for _, c := range conflicts {
@@ -296,10 +296,10 @@ func buildHTMLReport(subnet string, conflicts []ConflictEntry) string {
 		vendorHTML := strings.Join(vendorsToHTML(c.Vendors), "<br>")
 
 		b.WriteString(`<tr style="border-bottom:1px solid #eee">`)
-		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;font-weight:600">%s</td>`, htmlEsc(c.IP)))
-		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;color:#666">%s</td>`, htmlEsc(hostname)))
-		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px;font-family:'Courier New',monospace;font-size:12px">%s</td>`, macHTML))
-		b.WriteString(fmt.Sprintf(`<td style="padding:10px 12px">%s</td>`, vendorHTML))
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-weight:600;white-space:nowrap">%s</td>`, htmlEsc(c.IP)))
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;color:#666">%s</td>`, htmlEsc(hostname)))
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-family:'Courier New',monospace;font-size:13px;white-space:nowrap">%s</td>`, macHTML))
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px">%s</td>`, vendorHTML))
 		b.WriteString(`</tr>`)
 	}
 
