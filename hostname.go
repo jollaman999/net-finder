@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -15,6 +17,8 @@ import (
 // 2. NetBIOS Name Service (UDP 137) - Windows/Samba hosts
 // 3. mDNS (UDP 5353) - Linux (Avahi) / macOS hosts
 // 4. SNMP sysName (UDP 161) - network devices / servers with SNMP
+// 5. TLS Certificate CN/SAN (TCP 443) - HTTPS servers, ESXi, etc.
+// 6. SMTP Banner (TCP 25) - mail servers
 func ResolveHostnames(ips []string) []HostnameEntry {
 	if len(ips) == 0 {
 		return nil
@@ -48,6 +52,12 @@ func ResolveHostnames(ips []string) []HostnameEntry {
 				}
 				if hostname == "" {
 					hostname = resolveSNMP(ip)
+				}
+				if hostname == "" {
+					hostname = resolveTLS(ip)
+				}
+				if hostname == "" {
+					hostname = resolveSMTP(ip)
 				}
 
 				if hostname != "" {
@@ -517,4 +527,87 @@ func asn1Skip(data []byte, pos int) int {
 		return -1
 	}
 	return vpos + vlen
+}
+
+// resolveTLS connects to port 443 and extracts hostname from TLS certificate CN/SAN
+func resolveTLS(ip string) string {
+	conn, err := net.DialTimeout("tcp4", ip+":443", 500*time.Millisecond)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+
+	tlsConn := tls.Client(conn, &tls.Config{
+		InsecureSkipVerify: true,
+	})
+	tlsConn.SetDeadline(time.Now().Add(2 * time.Second))
+
+	if err := tlsConn.Handshake(); err != nil {
+		return ""
+	}
+
+	certs := tlsConn.ConnectionState().PeerCertificates
+	if len(certs) == 0 {
+		return ""
+	}
+
+	cert := certs[0]
+
+	// Try SAN DNS names first (more specific)
+	for _, name := range cert.DNSNames {
+		name = strings.TrimSpace(name)
+		if name != "" && name != ip && !strings.HasPrefix(name, "*") {
+			return name
+		}
+	}
+
+	// Fall back to CN
+	cn := strings.TrimSpace(cert.Subject.CommonName)
+	if cn != "" && cn != ip && !strings.HasPrefix(cn, "*") {
+		return cn
+	}
+
+	return ""
+}
+
+// resolveSMTP connects to port 25 and extracts hostname from SMTP banner
+func resolveSMTP(ip string) string {
+	conn, err := net.DialTimeout("tcp4", ip+":25", 500*time.Millisecond)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(2 * time.Second))
+
+	reader := bufio.NewReader(conn)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return ""
+	}
+
+	line = strings.TrimSpace(line)
+	// SMTP banner format: "220 hostname ..." or "220-hostname ..."
+	if !strings.HasPrefix(line, "220") {
+		return ""
+	}
+
+	// Remove "220" prefix and separator
+	banner := line[3:]
+	if len(banner) > 0 && (banner[0] == ' ' || banner[0] == '-') {
+		banner = banner[1:]
+	}
+
+	// First word is the hostname
+	fields := strings.Fields(banner)
+	if len(fields) == 0 {
+		return ""
+	}
+
+	hostname := fields[0]
+	// Validate it looks like a hostname (contains a dot or is a simple name)
+	if hostname == "" || hostname == ip || hostname == "localhost" {
+		return ""
+	}
+
+	return hostname
 }
