@@ -116,6 +116,7 @@ type ARPSpoofAlert struct {
 	Count     int    `json:"count"`
 	FirstSeen string `json:"firstSeen"`
 	Timestamp string `json:"timestamp"`
+	Subnet    string `json:"subnet"`
 }
 
 // DNSSpoofAlert represents a DNS spoofing alert
@@ -173,9 +174,10 @@ type Scanner struct {
 	running bool
 	runMu   sync.Mutex
 
-	arpResult   *ARPResult
-	hostnameMap map[string]string
-	hostnameMu  sync.RWMutex
+	arpResult      *ARPResult
+	hostnameMap    map[string]string
+	hostnameMu     sync.RWMutex
+	emailedARPKeys map[string]bool
 }
 
 // NewScanner creates a new Scanner instance
@@ -188,7 +190,8 @@ func NewScanner(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr,
 		state: ScanState{
 			Status: "idle",
 		},
-		hostnameMap: make(map[string]string),
+		hostnameMap:    make(map[string]string),
+		emailedARPKeys: make(map[string]bool),
 	}
 }
 
@@ -415,6 +418,8 @@ func (s *Scanner) run() {
 		s.runMu.Unlock()
 	}()
 
+	s.emailedARPKeys = make(map[string]bool)
+
 	s.state.mu.Lock()
 	s.state.Status = "running"
 	s.state.Hosts = nil
@@ -635,6 +640,11 @@ func (s *Scanner) processARPResults(result *ARPResult) {
 	s.state.Conflicts = conflicts
 	s.state.mu.Unlock()
 
+	// Send alerts for discovered hosts
+	if s.alertMgr != nil && len(sorted) > 0 {
+		go s.alertMgr.SendHostAlerts(sorted)
+	}
+
 	// Send alerts for detected conflicts (grouped by subnet)
 	if s.alertMgr != nil && len(conflicts) > 0 {
 		go s.alertMgr.SendConflictAlerts(conflicts)
@@ -675,6 +685,11 @@ func (s *Scanner) processDHCPResults(servers []DHCPServerInfo) {
 	s.state.mu.Lock()
 	s.state.DHCPServers = result
 	s.state.mu.Unlock()
+
+	// Send alerts for detected DHCP servers
+	if s.alertMgr != nil && len(result) > 0 {
+		go s.alertMgr.SendDHCPAlerts(result)
+	}
 }
 
 // resolveHostnames resolves DNS PTR for all discovered hosts
@@ -736,6 +751,10 @@ func (s *Scanner) checkDNSSpoofing() {
 		s.state.mu.Lock()
 		s.state.DNSAlerts = append(s.state.DNSAlerts, alerts...)
 		s.state.mu.Unlock()
+
+		if s.alertMgr != nil {
+			go s.alertMgr.SendSecurityAlerts(nil, alerts)
+		}
 	}
 }
 
@@ -760,13 +779,26 @@ func (s *Scanner) backgroundProtocolListeners() {
 		var wg sync.WaitGroup
 		wg.Add(4)
 
+		var newHSRP []HSRPEntry
+		var newVRRP []VRRPEntry
+		var newLLDP []LLDPNeighbor
+		var newCDP []CDPNeighbor
+		var protoMu sync.Mutex
+
 		go func() {
 			defer wg.Done()
 			entries, _ := ListenHSRP(s.iface.Name, 30*time.Second, s.bgStopCh)
 			if len(entries) > 0 {
 				s.state.mu.Lock()
+				before := len(s.state.HSRPEntries)
 				s.state.HSRPEntries = deduplicateHSRP(append(s.state.HSRPEntries, entries...))
+				after := len(s.state.HSRPEntries)
 				s.state.mu.Unlock()
+				if after > before {
+					protoMu.Lock()
+					newHSRP = entries
+					protoMu.Unlock()
+				}
 			}
 		}()
 
@@ -775,8 +807,15 @@ func (s *Scanner) backgroundProtocolListeners() {
 			entries, _ := ListenVRRP(s.iface.Name, 30*time.Second, s.bgStopCh)
 			if len(entries) > 0 {
 				s.state.mu.Lock()
+				before := len(s.state.VRRPEntries)
 				s.state.VRRPEntries = deduplicateVRRP(append(s.state.VRRPEntries, entries...))
+				after := len(s.state.VRRPEntries)
 				s.state.mu.Unlock()
+				if after > before {
+					protoMu.Lock()
+					newVRRP = entries
+					protoMu.Unlock()
+				}
 			}
 		}()
 
@@ -785,8 +824,15 @@ func (s *Scanner) backgroundProtocolListeners() {
 			entries, _ := ListenLLDP(s.iface.Name, 30*time.Second, s.bgStopCh)
 			if len(entries) > 0 {
 				s.state.mu.Lock()
+				before := len(s.state.LLDPNeighbors)
 				s.state.LLDPNeighbors = deduplicateLLDP(append(s.state.LLDPNeighbors, entries...))
+				after := len(s.state.LLDPNeighbors)
 				s.state.mu.Unlock()
+				if after > before {
+					protoMu.Lock()
+					newLLDP = entries
+					protoMu.Unlock()
+				}
 			}
 		}()
 
@@ -795,12 +841,28 @@ func (s *Scanner) backgroundProtocolListeners() {
 			entries, _ := ListenCDP(s.iface.Name, 30*time.Second, s.bgStopCh)
 			if len(entries) > 0 {
 				s.state.mu.Lock()
+				before := len(s.state.CDPNeighbors)
 				s.state.CDPNeighbors = deduplicateCDP(append(s.state.CDPNeighbors, entries...))
+				after := len(s.state.CDPNeighbors)
 				s.state.mu.Unlock()
+				if after > before {
+					protoMu.Lock()
+					newCDP = entries
+					protoMu.Unlock()
+				}
 			}
 		}()
 
 		wg.Wait()
+
+		if s.alertMgr != nil {
+			if len(newHSRP) > 0 || len(newVRRP) > 0 {
+				go s.alertMgr.SendProtocolAlerts(newHSRP, newVRRP)
+			}
+			if len(newLLDP) > 0 || len(newCDP) > 0 {
+				go s.alertMgr.SendDiscoveryAlerts(newLLDP, newCDP)
+			}
+		}
 	}
 }
 
@@ -847,6 +909,7 @@ func (s *Scanner) backgroundARPMonitor() {
 		}
 		if len(alerts) > 0 {
 			var newConflicts []ConflictEntry
+			var newARPAlerts []ARPSpoofAlert
 			s.state.mu.Lock()
 			for _, a := range alerts {
 				key := a.IP + ":" + a.NewMAC
@@ -861,17 +924,25 @@ func (s *Scanner) backgroundARPMonitor() {
 					}
 				}
 				if !merged {
+					a.Subnet = s.findSubnet(net.ParseIP(a.IP))
 					s.state.ARPAlerts = append(s.state.ARPAlerts, a)
 					newConflicts = append(newConflicts, ConflictEntry{
 						IP:     a.IP,
 						MACs:   []string{a.OldMAC, a.NewMAC},
-						Subnet: s.findSubnet(net.ParseIP(a.IP)),
+						Subnet: a.Subnet,
 					})
+					if !s.emailedARPKeys[key] {
+						s.emailedARPKeys[key] = true
+						newARPAlerts = append(newARPAlerts, a)
+					}
 				}
 			}
 			s.state.mu.Unlock()
 			if s.alertMgr != nil && len(newConflicts) > 0 {
 				go s.alertMgr.SendConflictAlerts(newConflicts)
+			}
+			if s.alertMgr != nil && len(newARPAlerts) > 0 {
+				go s.alertMgr.SendSecurityAlerts(newARPAlerts, nil)
 			}
 		}
 	}

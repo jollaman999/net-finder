@@ -451,6 +451,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
   <div class="header-controls">
     <button id="btnScan" class="btn btn-primary" onclick="startScan()" data-i18n="btn_scan">Start Scan</button>
     <button id="btnStop" class="btn btn-danger" onclick="stopScan()" disabled data-i18n="btn_stop">Stop Scan</button>
+    <button class="btn" onclick="openAlertModal()" data-i18n="btn_alert_config">Alert Settings</button>
     <select id="langSelect" class="lang-select" onchange="setLanguage(this.value)">
       <option value="en">EN</option>
       <option value="ko">KO</option>
@@ -507,10 +508,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
 
     <!-- Conflicts Panel -->
     <div class="panel" id="panel-conflicts">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-        <input type="text" class="search-box" style="margin-bottom:0" data-i18n-placeholder="search_generic" placeholder="Search..." oninput="filterTable('conflicts-table', this.value)">
-        <button class="btn btn-primary" onclick="openAlertModal()" data-i18n="btn_alert_config">Alert Settings</button>
-      </div>
+      <input type="text" class="search-box" data-i18n-placeholder="search_generic" placeholder="Search..." oninput="filterTable('conflicts-table', this.value)">
       <div class="subnet-filter" id="subnet-filter-conflicts"></div>
       <div style="overflow-x:auto">
       <table id="conflicts-table">
@@ -688,6 +686,10 @@ tr.subnet-header:hover { background: var(--primary-light); }
         <label class="form-label" data-i18n="alert_subnets">Subnets to monitor</label>
         <div class="subnet-select" id="alertSubnetList"></div>
       </div>
+      <div class="form-group">
+        <label class="form-label" data-i18n="alert_events">Alert Events</label>
+        <div class="subnet-select" id="alertEventList"></div>
+      </div>
       <div class="form-group"><label class="form-label" data-i18n="alert_smtp_from">From (Sender)</label><input class="form-input" id="alertSmtpFrom" placeholder="alert@example.com"></div>
       <div class="form-group"><label class="form-label" data-i18n="alert_smtp_to">Recipient</label><input class="form-input" id="alertSmtpTo" placeholder="admin@example.com"></div>
       <div class="form-group"><label class="form-label" data-i18n="alert_smtp_host">SMTP Host</label><input class="form-input" id="alertSmtpHost" placeholder="smtp.example.com"></div>
@@ -705,7 +707,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
       <div id="alertMsg"></div>
     </div>
     <div class="modal-footer">
-      <button class="btn" onclick="testAlert()" data-i18n="btn_test">Test</button>
+      <button class="btn" id="btnAlertTest" onclick="testAlert()" data-i18n="btn_test">Test</button>
       <button class="btn" id="btnAlertCancel" onclick="cancelEditAlert()" style="display:none" data-i18n="btn_cancel">Cancel</button>
       <button class="btn btn-primary" id="btnAlertSave" onclick="saveAlert()" data-i18n="btn_save">Save</button>
     </div>
@@ -811,6 +813,15 @@ const i18n = {
     btn_cancel: 'Cancel',
     btn_edit: 'Edit',
     btn_delete: 'Delete',
+    alert_events: 'Alert Events',
+    alert_events_all: 'All events',
+    alert_event_hosts: 'Host Discovery',
+    alert_event_conflicts: 'IP Conflicts',
+    alert_event_dhcp: 'DHCP Servers',
+    alert_event_hsrp_vrrp: 'HSRP/VRRP',
+    alert_event_lldp_cdp: 'LLDP/CDP',
+    alert_event_arp: 'ARP Spoofing',
+    alert_event_dns: 'DNS Spoofing',
     alert_test_ok: 'Test alert sent successfully',
     alert_test_fail: 'Test failed: {0}',
     alert_saved: 'Alert saved',
@@ -912,6 +923,15 @@ const i18n = {
     btn_cancel: '취소',
     btn_edit: '수정',
     btn_delete: '삭제',
+    alert_events: '알림 대상',
+    alert_events_all: '전체 이벤트',
+    alert_event_hosts: '호스트 발견',
+    alert_event_conflicts: 'IP 충돌',
+    alert_event_dhcp: 'DHCP 서버 발견',
+    alert_event_hsrp_vrrp: 'HSRP/VRRP 발견',
+    alert_event_lldp_cdp: 'LLDP/CDP 발견',
+    alert_event_arp: 'ARP 스푸핑',
+    alert_event_dns: 'DNS 스푸핑',
     alert_test_ok: '테스트 알림 발송 성공',
     alert_test_fail: '테스트 실패: {0}',
     alert_saved: '알림 저장 완료',
@@ -1530,6 +1550,7 @@ function resetAlertForm() {
   document.getElementById('alertSmtpTo').value = '';
   document.getElementById('alertMsg').innerHTML = '';
   populateAlertSubnets(null);
+  populateAlertEvents(null);
   setEditMode(false);
 }
 
@@ -1578,6 +1599,45 @@ function updateAlertSubnetAll() {
   }
 }
 
+const alertEventKeys = ['hosts', 'conflicts', 'dhcp', 'hsrp_vrrp', 'lldp_cdp', 'arp_spoofing', 'dns_spoofing'];
+
+const alertEventI18n = { hosts:'alert_event_hosts', conflicts:'alert_event_conflicts', dhcp:'alert_event_dhcp', hsrp_vrrp:'alert_event_hsrp_vrrp', lldp_cdp:'alert_event_lldp_cdp', arp_spoofing:'alert_event_arp', dns_spoofing:'alert_event_dns' };
+
+function populateAlertEvents(selectedEvents) {
+  const container = document.getElementById('alertEventList');
+  const isAll = !selectedEvents || selectedEvents.length === 0;
+  let html = '<label><input type="checkbox" id="alertEventAll"' + (isAll ? ' checked' : '') + ' onchange="toggleAlertEventsAll(this.checked)"> ' + esc(t('alert_events_all')) + '</label>';
+  for (const key of alertEventKeys) {
+    const checked = isAll || selectedEvents.includes(key);
+    html += '<label><input type="checkbox" class="alert-event-cb" value="' + escAttr(key) + '"' + (checked ? ' checked' : '') + ' onchange="updateAlertEventAll()"> ' + esc(t(alertEventI18n[key])) + '</label>';
+  }
+  container.innerHTML = html;
+  if (!isAll) updateAlertEventAll();
+}
+
+function toggleAlertEventsAll(checked) {
+  document.querySelectorAll('.alert-event-cb').forEach(cb => cb.checked = checked);
+  const allCb = document.getElementById('alertEventAll');
+  if (allCb) { allCb.checked = checked; allCb.indeterminate = false; }
+}
+
+function updateAlertEventAll() {
+  const cbs = document.querySelectorAll('.alert-event-cb');
+  const allCb = document.getElementById('alertEventAll');
+  if (!allCb || cbs.length === 0) return;
+  const checkedCount = document.querySelectorAll('.alert-event-cb:checked').length;
+  if (checkedCount === cbs.length) {
+    allCb.checked = true;
+    allCb.indeterminate = false;
+  } else if (checkedCount === 0) {
+    allCb.checked = false;
+    allCb.indeterminate = false;
+  } else {
+    allCb.checked = false;
+    allCb.indeterminate = true;
+  }
+}
+
 function getAlertFormData() {
   const cbs = document.querySelectorAll('.alert-subnet-cb');
   const checkedCount = document.querySelectorAll('.alert-subnet-cb:checked').length;
@@ -1586,8 +1646,17 @@ function getAlertFormData() {
   if (!allChecked) {
     document.querySelectorAll('.alert-subnet-cb:checked').forEach(cb => subnets.push(cb.value));
   }
+  // Collect events
+  const evCbs = document.querySelectorAll('.alert-event-cb');
+  const evCheckedCount = document.querySelectorAll('.alert-event-cb:checked').length;
+  const evAllChecked = evCbs.length > 0 && evCheckedCount === evCbs.length;
+  let events = [];
+  if (!evAllChecked) {
+    document.querySelectorAll('.alert-event-cb:checked').forEach(cb => events.push(cb.value));
+  }
   const cfg = {
     subnets: subnets,
+    events: events,
     type: 'email',
     smtpFrom: document.getElementById('alertSmtpFrom').value,
     smtpTo: document.getElementById('alertSmtpTo').value,
@@ -1643,6 +1712,7 @@ function editAlert(id) {
     document.getElementById('alertSmtpUser').value = cfg.smtpUser || '';
     document.getElementById('alertSmtpPass').value = cfg.smtpPass || '';
     populateAlertSubnets(cfg.subnets);
+    populateAlertEvents(cfg.events);
     setEditMode(true);
     document.getElementById('alertMsg').innerHTML = '';
     // Scroll to top of modal
@@ -1693,9 +1763,10 @@ function renderAlertList(configs) {
   let html = '';
   for (const c of configs) {
     const subnetsLabel = c.subnets && c.subnets.length > 0 ? c.subnets.join(', ') : t('alert_subnets_all');
+    const eventsLabel = c.events && c.events.length > 0 ? c.events.map(e => t(alertEventI18n[e] || e)).join(', ') : t('alert_events_all');
     const fromTo = (c.smtpFrom || '?') + ' &rarr; ' + (c.smtpTo || '?');
     const flags = [c.smtpHost + ':' + (c.smtpPort||465), c.smtpSSL ? 'SSL' : 'STARTTLS', c.smtpAuth ? 'AUTH' : ''].filter(Boolean).join(' | ');
-    html += '<div class="alert-list-item"><div class="alert-info"><strong>EMAIL</strong> &mdash; ' + fromTo + '<br><span style="font-size:12px;color:var(--text-secondary)">' + esc(flags) + ' / ' + esc(subnetsLabel) + '</span></div>'
+    html += '<div class="alert-list-item"><div class="alert-info"><strong>EMAIL</strong> &mdash; ' + fromTo + '<br><span style="font-size:12px;color:var(--text-secondary)">' + esc(flags) + ' / ' + esc(subnetsLabel) + '<br>' + esc(eventsLabel) + '</span></div>'
       + '<div style="display:flex;gap:4px">'
       + '<button class="btn-sm btn-primary" onclick="editAlert(\'' + escAttr(c.id) + '\')" data-i18n="btn_edit">' + esc(t('btn_edit')) + '</button>'
       + '<button class="btn-sm btn-danger" onclick="deleteAlert(\'' + escAttr(c.id) + '\')" data-i18n="btn_delete">' + esc(t('btn_delete')) + '</button>'
