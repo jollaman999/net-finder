@@ -456,8 +456,8 @@ func vendorsToHTML(vendors []string) []string {
 }
 
 func sendEmailHTML(cfg AlertConfig, subject, htmlBody string) error {
-	if cfg.SmtpHost == "" || cfg.SmtpTo == "" {
-		return fmt.Errorf("SMTP host and recipient required")
+	if cfg.SmtpHost == "" || cfg.SmtpTo == "" || cfg.SmtpFrom == "" {
+		return fmt.Errorf("SMTP host, sender and recipient required")
 	}
 	port := cfg.SmtpPort
 	if port == 0 {

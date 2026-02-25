@@ -151,6 +151,10 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 				http.Error(w, "Invalid JSON", http.StatusBadRequest)
 				return
 			}
+			if cfg.SmtpHost == "" || cfg.SmtpTo == "" || cfg.SmtpFrom == "" {
+				writeJSON(w, map[string]interface{}{"status": "error", "message": "smtpFrom, smtpTo and smtpHost are required"})
+				return
+			}
 			alertMgr.AddConfig(cfg)
 			writeJSON(w, map[string]string{"status": "ok"})
 		case http.MethodPut:
@@ -161,6 +165,10 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			}
 			if cfg.ID == "" {
 				http.Error(w, "id required", http.StatusBadRequest)
+				return
+			}
+			if cfg.SmtpHost == "" || cfg.SmtpTo == "" || cfg.SmtpFrom == "" {
+				writeJSON(w, map[string]interface{}{"status": "error", "message": "smtpFrom, smtpTo and smtpHost are required"})
 				return
 			}
 			if alertMgr.UpdateConfig(cfg) {
