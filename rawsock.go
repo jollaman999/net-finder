@@ -56,6 +56,9 @@ func NewRawSocket(ifaceName string) (*RawSocket, error) {
 		return nil, err
 	}
 
+	// Increase receive buffer to 4MB to prevent packet drops during large scans
+	_ = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_RCVBUF, 4*1024*1024)
+
 	// Set receive timeout (500ms, matching pcap behaviour)
 	tv := syscall.Timeval{Sec: 0, Usec: 500000}
 	if err := syscall.SetsockoptTimeval(fd, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, &tv); err != nil {
