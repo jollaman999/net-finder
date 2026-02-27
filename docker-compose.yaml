@@ -1,0 +1,12 @@
+services:
+  net-finder:
+    image: jollaman999/net-finder:latest
+    container_name: net-finder
+    network_mode: host
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    volumes:
+      - ./config:/root/.config/net-finder
+      - /etc/machine-id:/etc/machine-id:ro
+    restart: always

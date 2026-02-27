@@ -51,6 +51,29 @@ make install    # /usr/local/bin에 설치
 make uninstall  # /usr/local/bin에서 제거
 ```
 
+## Docker
+
+```bash
+make docker-build   # Docker 이미지 빌드 (alpine 기반)
+make docker-push    # 빌드 후 Docker Hub에 푸시
+make docker-run     # 컨테이너 실행 (--network host, NET_RAW/NET_ADMIN)
+make docker-up      # docker compose로 시작 (백그라운드)
+make docker-down    # docker compose 중지
+```
+
+Docker로 직접 실행:
+
+```bash
+docker build -t net-finder .
+docker run --rm --network host --cap-add NET_RAW --cap-add NET_ADMIN net-finder
+```
+
+원시 패킷 캡처를 위해 `--network host`가 필요합니다. 이미지 이름 뒤에 플래그를 전달할 수 있습니다:
+
+```bash
+docker run --rm --network host --cap-add NET_RAW --cap-add NET_ADMIN net-finder -i eth0 -p 8080
+```
+
 ## 사용법
 
 ```bash

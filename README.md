@@ -53,6 +53,29 @@ make install    # Install to /usr/local/bin
 make uninstall  # Remove from /usr/local/bin
 ```
 
+## Docker
+
+```bash
+make docker-build   # Build Docker image (alpine-based)
+make docker-push    # Build and push to Docker Hub
+make docker-run     # Run container (--network host, NET_RAW/NET_ADMIN)
+make docker-up      # Start with docker compose (detached)
+make docker-down    # Stop docker compose
+```
+
+Or run directly with Docker:
+
+```bash
+docker build -t net-finder .
+docker run --rm --network host --cap-add NET_RAW --cap-add NET_ADMIN net-finder
+```
+
+`--network host` is required for raw packet capture on the host network. Pass flags after the image name:
+
+```bash
+docker run --rm --network host --cap-add NET_RAW --cap-add NET_ADMIN net-finder -i eth0 -p 8080
+```
+
 ## Usage
 
 ```bash
