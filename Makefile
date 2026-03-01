@@ -7,7 +7,7 @@ IMAGE     := jollaman999/net-finder
 VERSION   := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS   := -s -w -X main.version=$(VERSION)
 
-.PHONY: all build clean install uninstall run deps fmt vet \
+.PHONY: all build clean install uninstall run dev deps fmt vet \
         docker-build docker-push docker-run docker-up docker-down
 
 all: build
@@ -26,6 +26,10 @@ uninstall:
 
 run: build
 	sudo ./$(BINARY)
+
+dev:
+	@which air > /dev/null 2>&1 || go install github.com/air-verse/air@latest
+	air
 
 deps:
 	$(GO) mod download

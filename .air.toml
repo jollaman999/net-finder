@@ -1,0 +1,16 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  cmd = "go build -ldflags '-s -w' -o ./net-finder ./cmd/net-finder"
+  bin = "./net-finder"
+  full_bin = "sudo ./net-finder"
+  include_ext = ["go", "html"]
+  exclude_dir = ["config", "docs", ".git", ".github"]
+  delay = 1000
+
+[log]
+  time = true
+
+[misc]
+  clean_on_exit = true
