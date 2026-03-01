@@ -342,7 +342,9 @@ tr.subnet-header:hover { background: var(--primary-light); }
   max-width: 520px;
   width: 90%;
   max-height: 90vh;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .modal-header {
   display: flex;
@@ -350,6 +352,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
   justify-content: space-between;
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 .modal-header h3 { font-size: 16px; font-weight: 600; }
 .modal-header button {
@@ -361,13 +364,14 @@ tr.subnet-header:hover { background: var(--primary-light); }
   padding: 0 4px;
 }
 .modal-header button:hover { color: var(--text); }
-.modal-body { padding: 20px; }
+.modal-body { padding: 20px; overflow-y: auto; flex: 1; min-height: 0; }
 .modal-footer {
   padding: 12px 20px;
   border-top: 1px solid var(--border);
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+  flex-shrink: 0;
 }
 .form-group { margin-bottom: 14px; }
 .form-label {
@@ -680,8 +684,8 @@ tr.subnet-header:hover { background: var(--primary-light); }
 </div>
 
 <!-- Alert Settings Modal -->
-<div class="modal-overlay" id="alertModal" style="display:none" onclick="closeAlertModal(event)">
-  <div class="modal" onclick="event.stopPropagation()">
+<div class="modal-overlay" id="alertModal" style="display:none">
+  <div class="modal">
     <div class="modal-header">
       <h3 data-i18n="alert_title">Alert Settings</h3>
       <button onclick="closeAlertModal()">&times;</button>
@@ -710,13 +714,13 @@ tr.subnet-header:hover { background: var(--primary-light); }
         <div class="form-group"><label class="form-label" data-i18n="alert_smtp_pass">Password</label><input class="form-input" id="alertSmtpPass" type="password"></div>
       </div>
       <div id="alertMsg"></div>
+      <div class="alert-list" id="alertList"></div>
     </div>
     <div class="modal-footer">
       <button class="btn" id="btnAlertTest" onclick="testAlert()" data-i18n="btn_test">Test</button>
       <button class="btn" id="btnAlertCancel" onclick="cancelEditAlert()" style="display:none" data-i18n="btn_cancel">Cancel</button>
       <button class="btn btn-primary" id="btnAlertSave" onclick="saveAlert()" data-i18n="btn_save">Save</button>
     </div>
-    <div class="alert-list" id="alertList"></div>
   </div>
 </div>
 
@@ -1567,10 +1571,15 @@ function openAlertModal() {
   loadAlertConfigs();
 }
 
-function closeAlertModal(event) {
-  if (event && event.target !== document.getElementById('alertModal')) return;
+function closeAlertModal() {
   document.getElementById('alertModal').style.display = 'none';
 }
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && document.getElementById('alertModal').style.display !== 'none') {
+    closeAlertModal();
+  }
+});
 
 function onSSLChange() {
   const ssl = document.getElementById('alertSmtpSSL').checked;
@@ -1738,7 +1747,7 @@ function editAlert(id) {
     setEditMode(true);
     document.getElementById('alertMsg').innerHTML = '';
     // Scroll to top of modal
-    document.querySelector('#alertModal .modal').scrollTop = 0;
+    document.querySelector('#alertModal .modal-body').scrollTop = 0;
   });
 }
 
