@@ -168,6 +168,9 @@ func parseCDPAddresses(data []byte) []string {
 		if protoType == 1 && addrLen == 4 { // IPv4
 			addr := fmt.Sprintf("%d.%d.%d.%d", data[offset], data[offset+1], data[offset+2], data[offset+3])
 			addrs = append(addrs, addr)
+		} else if protoType == 2 && addrLen == 16 { // IPv6
+			addr := net.IP(data[offset : offset+16]).String()
+			addrs = append(addrs, addr)
 		}
 		offset += addrLen
 	}

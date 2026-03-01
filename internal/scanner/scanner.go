@@ -25,6 +25,13 @@ type Scanner struct {
 	oui      *oui.OUIDatabase
 	alertMgr *alert.AlertManager
 
+	// IPv6 fields
+	localIPv6     net.IP
+	linkLocalIPv6 net.IP
+	subnetsV6     []*net.IPNet
+	ipMode        models.IPMode
+	ndpResult     *protocol.NDPResult
+
 	state models.ScanState
 
 	stopCh   chan struct{}
@@ -36,21 +43,30 @@ type Scanner struct {
 	hostnameMap    map[string]string
 	hostnameMu     sync.RWMutex
 	emailedARPKeys map[string]bool
+	emailedNDPKeys map[string]bool
 }
 
 // NewScanner creates a new Scanner instance
-func NewScanner(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, subnets []*net.IPNet, alertMgr *alert.AlertManager) *Scanner {
+func NewScanner(iface *net.Interface, localIP, localIPv6, linkLocalIPv6 net.IP,
+	localMAC net.HardwareAddr, subnets, subnetsV6 []*net.IPNet,
+	ipMode models.IPMode, alertMgr *alert.AlertManager) *Scanner {
 	return &Scanner{
-		iface:    iface,
-		localIP:  localIP,
-		localMAC: localMAC,
-		subnets:  subnets,
-		alertMgr: alertMgr,
+		iface:         iface,
+		localIP:       localIP,
+		localMAC:      localMAC,
+		subnets:       subnets,
+		localIPv6:     localIPv6,
+		linkLocalIPv6: linkLocalIPv6,
+		subnetsV6:     subnetsV6,
+		ipMode:        ipMode,
+		alertMgr:      alertMgr,
 		state: models.ScanState{
 			Status: "idle",
+			IPMode: ipMode,
 		},
 		hostnameMap:    make(map[string]string),
 		emailedARPKeys: make(map[string]bool),
+		emailedNDPKeys: make(map[string]bool),
 	}
 }
 
@@ -120,15 +136,19 @@ func (s *Scanner) setProgress(phase string, percent, count int) {
 func (s *Scanner) GetStatus() map[string]interface{} {
 	s.state.Mu.RLock()
 	defer s.state.Mu.RUnlock()
-	subnetStrs := make([]string, len(s.subnets))
-	for i, sn := range s.subnets {
-		subnetStrs[i] = sn.String()
+	var subnetStrs []string
+	for _, sn := range s.subnets {
+		subnetStrs = append(subnetStrs, sn.String())
+	}
+	for _, sn := range s.subnetsV6 {
+		subnetStrs = append(subnetStrs, sn.String())
 	}
 	netutil.SortCIDRStrings(subnetStrs)
 	return map[string]interface{}{
 		"status":   s.state.Status,
 		"progress": s.state.Progress,
 		"subnets":  subnetStrs,
+		"ipMode":   s.ipMode,
 	}
 }
 
@@ -232,6 +252,39 @@ func (s *Scanner) GetDNSAlerts() []models.DNSSpoofAlert {
 	return s.state.DNSAlerts
 }
 
+// GetNDPAlerts returns NDP spoof alerts
+func (s *Scanner) GetNDPAlerts() []models.NDPSpoofAlert {
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
+	if s.state.NDPAlerts == nil {
+		return []models.NDPSpoofAlert{}
+	}
+	return s.state.NDPAlerts
+}
+
+// GetDHCPv6Servers returns detected DHCPv6 servers
+func (s *Scanner) GetDHCPv6Servers() []models.DHCPv6ServerJSON {
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
+	if s.state.DHCPv6Servers == nil {
+		return []models.DHCPv6ServerJSON{}
+	}
+	return s.state.DHCPv6Servers
+}
+
+// GetIPMode returns current IP mode
+func (s *Scanner) GetIPMode() models.IPMode {
+	return s.ipMode
+}
+
+// SetIPMode updates the IP mode
+func (s *Scanner) SetIPMode(mode models.IPMode) {
+	s.ipMode = mode
+	s.state.Mu.Lock()
+	s.state.IPMode = mode
+	s.state.Mu.Unlock()
+}
+
 // GetInterfaces returns available network interfaces
 func GetInterfaces(currentIface string) []models.InterfaceInfo {
 	ifaces, err := net.Interfaces()
@@ -258,7 +311,7 @@ func GetInterfaces(currentIface string) []models.InterfaceInfo {
 		addrs, err := iface.Addrs()
 		if err == nil {
 			for _, addr := range addrs {
-				if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil {
+				if ipnet, ok := addr.(*net.IPNet); ok {
 					info.IPs = append(info.IPs, ipnet.IP.String())
 				}
 			}
@@ -278,12 +331,14 @@ func (s *Scanner) run() {
 	}()
 
 	s.emailedARPKeys = make(map[string]bool)
+	s.emailedNDPKeys = make(map[string]bool)
 
 	s.state.Mu.Lock()
 	s.state.Status = "running"
 	s.state.Hosts = nil
 	s.state.Conflicts = nil
 	s.state.DHCPServers = nil
+	s.state.DHCPv6Servers = nil
 	s.state.HSRPEntries = nil
 	s.state.VRRPEntries = nil
 	s.state.LLDPNeighbors = nil
@@ -291,6 +346,8 @@ func (s *Scanner) run() {
 	s.state.Hostnames = nil
 	s.state.ARPAlerts = nil
 	s.state.DNSAlerts = nil
+	s.state.NDPAlerts = nil
+	s.state.IPMode = s.ipMode
 	s.state.Mu.Unlock()
 
 	// Phase 1: Load OUI (0-5%)
@@ -317,49 +374,87 @@ func (s *Scanner) run() {
 
 	var scanWg sync.WaitGroup
 
-	// ── ARP Scan → Hostname Resolution (parallel branch 1) ──
-	scanWg.Add(1)
-	go func() {
-		defer scanWg.Done()
-		result, err := protocol.ARPScan(s.iface, s.localIP, s.localMAC, s.subnets, 3*time.Second)
-		if err != nil {
-			log.Printf("ARP 스캔 실패: %v", err)
-			return
-		}
-		s.arpResult = result
-		s.processARPResults(result)
-		s.setProgress("scan_arp_done", 30, len(s.GetHosts()))
+	// ── ARP Scan (IPv4, parallel branch 1) ──
+	if s.ipMode != models.IPModeIPv6 && s.localIP != nil {
+		scanWg.Add(1)
+		go func() {
+			defer scanWg.Done()
+			result, err := protocol.ARPScan(s.iface, s.localIP, s.localMAC, s.subnets, 3*time.Second)
+			if err != nil {
+				log.Printf("ARP 스캔 실패: %v", err)
+				return
+			}
+			s.arpResult = result
+			s.processARPResults(result)
+			s.setProgress("scan_arp_done", 30, len(s.GetHosts()))
+		}()
+	}
 
-		if s.stopped() {
-			return
-		}
-		// Hostname resolution immediately after ARP
-		s.resolveHostnames()
-	}()
+	// ── NDP Scan (IPv6, parallel branch 1b) ──
+	if s.ipMode != models.IPModeIPv4 && (s.localIPv6 != nil || s.linkLocalIPv6 != nil) {
+		scanWg.Add(1)
+		go func() {
+			defer scanWg.Done()
+			srcIPv6 := s.localIPv6
+			if srcIPv6 == nil {
+				srcIPv6 = s.linkLocalIPv6
+			}
+			log.Printf("NDP 스캔 시작 (소스: %s)", srcIPv6)
+			result, err := protocol.NDPScan(s.iface, srcIPv6, s.localMAC, s.subnetsV6, 3*time.Second)
+			if err != nil {
+				log.Printf("NDP 스캔 실패: %v", err)
+				return
+			}
+			log.Printf("NDP 스캔 완료: %d개 호스트 발견", len(result.Entries))
+			s.ndpResult = result
+			s.processNDPResults(result)
+			s.setProgress("scan_ndp_done", 35, len(s.GetHosts()))
+		}()
+	}
 
-	// ── DHCP Detection → DNS Spoofing Check (parallel branch 2) ──
-	scanWg.Add(1)
-	go func() {
-		defer scanWg.Done()
-		servers, err := protocol.DetectDHCP(s.iface, s.localMAC, 5*time.Second)
-		if err != nil {
-			log.Printf("DHCP 감지 실패: %v", err)
-			return
-		}
-		s.processDHCPResults(servers)
+	// ── DHCP Detection → DNS Spoofing Check (IPv4, parallel branch 2) ──
+	if s.ipMode != models.IPModeIPv6 {
+		scanWg.Add(1)
+		go func() {
+			defer scanWg.Done()
+			servers, err := protocol.DetectDHCP(s.iface, s.localMAC, 5*time.Second)
+			if err != nil {
+				log.Printf("DHCP 감지 실패: %v", err)
+				return
+			}
+			s.processDHCPResults(servers)
 
-		if s.stopped() {
-			return
-		}
-		// DNS spoofing check immediately after DHCP
-		s.checkDNSSpoofing()
-	}()
+			if s.stopped() {
+				return
+			}
+			// DNS spoofing check immediately after DHCP
+			s.checkDNSSpoofing()
+		}()
+	}
+
+	// ── DHCPv6 Detection (IPv6, parallel branch 2b) ──
+	if s.ipMode != models.IPModeIPv4 && (s.localIPv6 != nil || s.linkLocalIPv6 != nil) {
+		scanWg.Add(1)
+		go func() {
+			defer scanWg.Done()
+			srcIPv6 := s.linkLocalIPv6
+			if srcIPv6 == nil {
+				srcIPv6 = s.localIPv6
+			}
+			servers, err := protocol.DetectDHCPv6(s.iface, s.localMAC, srcIPv6, 5*time.Second)
+			if err != nil {
+				log.Printf("DHCPv6 감지 실패: %v", err)
+				return
+			}
+			s.processDHCPv6Results(servers)
+		}()
+	}
 
 	// ── Protocol Listeners: HSRP/VRRP/LLDP/CDP (parallel branch 3) ──
 	scanWg.Add(4)
 	go func() {
 		defer scanWg.Done()
-		entries, err := protocol.ListenHSRP(s.iface.Name, 30*time.Second, s.stopCh)
+		entries, err := protocol.ListenHSRP(s.iface.Name, 30*time.Second, s.stopCh, s.ipMode)
 		if err != nil {
 			log.Printf("HSRP 리스너 오류: %v", err)
 			return
@@ -370,7 +465,7 @@ func (s *Scanner) run() {
 	}()
 	go func() {
 		defer scanWg.Done()
-		entries, err := protocol.ListenVRRP(s.iface.Name, 30*time.Second, s.stopCh)
+		entries, err := protocol.ListenVRRP(s.iface.Name, 30*time.Second, s.stopCh, s.ipMode)
 		if err != nil {
 			log.Printf("VRRP 리스너 오류: %v", err)
 			return
@@ -408,6 +503,14 @@ func (s *Scanner) run() {
 		return
 	}
 
+	// Hostname resolution after all host discovery is done
+	s.setProgress("hostname_resolving", 90, len(s.GetHosts()))
+	s.resolveHostnames()
+
+	if s.stopped() {
+		return
+	}
+
 	s.setProgress("scan_done", 100, 0)
 	s.state.Mu.Lock()
 	s.state.Status = "done"
@@ -415,7 +518,12 @@ func (s *Scanner) run() {
 
 	// Start background listeners
 	go s.backgroundProtocolListeners()
-	go s.backgroundARPMonitor()
+	if s.ipMode != models.IPModeIPv6 {
+		go s.backgroundARPMonitor()
+	}
+	if s.ipMode != models.IPModeIPv4 {
+		go s.backgroundNDPMonitor()
+	}
 }
 
 // processARPResults converts ARPResult into Hosts and Conflicts
@@ -440,10 +548,11 @@ func (s *Scanner) processARPResults(result *protocol.ARPResult) {
 
 		// Every IP goes into the host list
 		host := models.HostEntry{
-			IP:     ipStr,
-			MAC:    strings.ToUpper(mac.String()),
-			Vendor: vendor,
-			Subnet: subnet,
+			IP:        ipStr,
+			MAC:       strings.ToUpper(mac.String()),
+			Vendor:    vendor,
+			Subnet:    subnet,
+			IPVersion: 4,
 		}
 
 		// Multiple MACs → check if bond or real conflict
@@ -493,7 +602,14 @@ func (s *Scanner) processARPResults(result *protocol.ARPResult) {
 	}
 
 	s.state.Mu.Lock()
-	s.state.Hosts = sorted
+	// Preserve hosts from other IP versions (e.g. IPv6 from NDP)
+	var keep []models.HostEntry
+	for _, h := range s.state.Hosts {
+		if h.IPVersion != 4 {
+			keep = append(keep, h)
+		}
+	}
+	s.state.Hosts = append(keep, sorted...)
 	s.state.Conflicts = conflicts
 	s.state.Mu.Unlock()
 
@@ -549,28 +665,69 @@ func (s *Scanner) processDHCPResults(servers []models.DHCPServerInfo) {
 	}
 }
 
-// resolveHostnames resolves DNS PTR for all discovered hosts
+// resolveHostnames resolves DNS PTR for all discovered hosts.
+// Safe to call concurrently from multiple goroutines — only resolves
+// IPs not yet in hostnameMap and merges results.
+// Also shares hostnames across IPv4/IPv6 hosts with the same MAC.
 func (s *Scanner) resolveHostnames() {
 	s.state.Mu.RLock()
 	hostsCopy := make([]models.HostEntry, len(s.state.Hosts))
 	copy(hostsCopy, s.state.Hosts)
 	s.state.Mu.RUnlock()
 
-	var ips []string
-	for _, h := range hostsCopy {
-		ips = append(ips, h.IP)
+	// In IPv6-only mode, do an internal ARP scan to obtain IPv4→MAC mappings.
+	// Hostnames resolved from IPv4 will be shared to IPv6 hosts via MAC matching.
+	if s.ipMode == models.IPModeIPv6 {
+		if extra := s.arpForHostnames(); len(extra) > 0 {
+			hostsCopy = append(hostsCopy, extra...)
+		}
 	}
 
-	entries := hostname.ResolveHostnames(ips)
+	// Only resolve IPs we haven't resolved yet
+	var ips []string
+	s.hostnameMu.RLock()
+	for _, h := range hostsCopy {
+		if _, ok := s.hostnameMap[h.IP]; !ok {
+			ips = append(ips, h.IP)
+		}
+	}
+	s.hostnameMu.RUnlock()
 
-	// Build hostname map
+	if len(ips) > 0 {
+		entries := hostname.ResolveHostnames(ips)
+
+		// Merge into hostname map
+		s.hostnameMu.Lock()
+		for _, e := range entries {
+			s.hostnameMap[e.IP] = e.Hostname
+		}
+		s.hostnameMu.Unlock()
+	}
+
+	// Share hostnames across hosts with same MAC (IPv4 ↔ IPv6)
 	s.hostnameMu.Lock()
-	for _, e := range entries {
-		s.hostnameMap[e.IP] = e.Hostname
+	macHostname := make(map[string]string)
+	// First pass: collect known hostnames per MAC
+	for _, h := range hostsCopy {
+		if hn, ok := s.hostnameMap[h.IP]; ok && hn != "" {
+			mac := strings.ToUpper(h.MAC)
+			if mac != "" {
+				macHostname[mac] = hn
+			}
+		}
+	}
+	// Second pass: fill missing hostnames from MAC match
+	for _, h := range hostsCopy {
+		if hn, ok := s.hostnameMap[h.IP]; (!ok || hn == "") && h.MAC != "" {
+			mac := strings.ToUpper(h.MAC)
+			if shared, found := macHostname[mac]; found {
+				s.hostnameMap[h.IP] = shared
+			}
+		}
 	}
 	s.hostnameMu.Unlock()
 
-	// Update hosts and conflicts with hostnames
+	// Update all hosts and conflicts with hostnames
 	s.state.Mu.Lock()
 	s.hostnameMu.RLock()
 	for i := range s.state.Hosts {
@@ -583,9 +740,43 @@ func (s *Scanner) resolveHostnames() {
 			s.state.Conflicts[i].Hostname = hn
 		}
 	}
+	// Rebuild full Hostnames list from map
+	s.state.Hostnames = nil
+	for ip, hn := range s.hostnameMap {
+		s.state.Hostnames = append(s.state.Hostnames, models.HostnameEntry{IP: ip, Hostname: hn})
+	}
 	s.hostnameMu.RUnlock()
-	s.state.Hostnames = entries
 	s.state.Mu.Unlock()
+}
+
+// arpForHostnames does a quick ARP scan to get IPv4→MAC mappings for hostname resolution.
+// Used in IPv6-only mode so that hostnames resolved from IPv4 can be shared to IPv6 hosts via MAC.
+func (s *Scanner) arpForHostnames() []models.HostEntry {
+	localIP, _, err := netutil.GetInterfaceAddr(s.iface)
+	if err != nil || localIP == nil {
+		return nil
+	}
+	subnets := netutil.ParseSubnets("", s.iface)
+	if len(subnets) == 0 {
+		return nil
+	}
+	log.Printf("호스트명 해석용 내부 ARP 스캔 시작")
+	result, err := protocol.ARPScan(s.iface, localIP, s.localMAC, subnets, 3*time.Second)
+	if err != nil {
+		log.Printf("호스트명용 ARP 스캔 실패: %v", err)
+		return nil
+	}
+	var hosts []models.HostEntry
+	for ip, macs := range result.Entries {
+		if len(macs) > 0 {
+			hosts = append(hosts, models.HostEntry{
+				IP:  ip,
+				MAC: macs[0].String(),
+			})
+		}
+	}
+	log.Printf("호스트명용 ARP 스캔 완료: %d개 IPv4 호스트", len(hosts))
+	return hosts
 }
 
 // checkDNSSpoofing runs DNS spoofing verification
@@ -621,6 +812,11 @@ func (s *Scanner) findSubnet(ip net.IP) string {
 			return subnet.String()
 		}
 	}
+	for _, subnet := range s.subnetsV6 {
+		if subnet.Contains(ip) {
+			return subnet.String()
+		}
+	}
 	return ""
 }
 
@@ -644,7 +840,7 @@ func (s *Scanner) backgroundProtocolListeners() {
 
 		go func() {
 			defer wg.Done()
-			entries, _ := protocol.ListenHSRP(s.iface.Name, 30*time.Second, s.bgStopCh)
+			entries, _ := protocol.ListenHSRP(s.iface.Name, 30*time.Second, s.bgStopCh, s.ipMode)
 			if len(entries) > 0 {
 				s.state.Mu.Lock()
 				before := len(s.state.HSRPEntries)
@@ -661,7 +857,7 @@ func (s *Scanner) backgroundProtocolListeners() {
 
 		go func() {
 			defer wg.Done()
-			entries, _ := protocol.ListenVRRP(s.iface.Name, 30*time.Second, s.bgStopCh)
+			entries, _ := protocol.ListenVRRP(s.iface.Name, 30*time.Second, s.bgStopCh, s.ipMode)
 			if len(entries) > 0 {
 				s.state.Mu.Lock()
 				before := len(s.state.VRRPEntries)
@@ -800,6 +996,167 @@ func (s *Scanner) backgroundARPMonitor() {
 			}
 			if s.alertMgr != nil && len(newARPAlerts) > 0 {
 				go s.alertMgr.SendSecurityAlerts(newARPAlerts, nil)
+			}
+		}
+	}
+}
+
+// processNDPResults converts NDPResult into Hosts (IPv6)
+func (s *Scanner) processNDPResults(result *protocol.NDPResult) {
+	result.Mu.Lock()
+	defer result.Mu.Unlock()
+
+	var hosts []models.HostEntry
+
+	for ipStr, macs := range result.Entries {
+		mac := macs[0]
+		vendor := "Unknown"
+		if s.oui != nil {
+			vendor = s.oui.Lookup(mac)
+		}
+
+		host := models.HostEntry{
+			IP:        ipStr,
+			MAC:       strings.ToUpper(mac.String()),
+			Vendor:    vendor,
+			Subnet:    s.findSubnet(net.ParseIP(ipStr)),
+			IPVersion: 6,
+		}
+
+		if len(macs) > 1 {
+			devGroups := netutil.GroupMACsByDevice(macs)
+			if len(devGroups) == 1 {
+				var macStrs, vendorStrs []string
+				for _, m := range macs {
+					macStrs = append(macStrs, strings.ToUpper(m.String()))
+					if s.oui != nil {
+						vendorStrs = append(vendorStrs, s.oui.Lookup(m))
+					}
+				}
+				host.IsBond = true
+				host.BondMACs = macStrs
+				host.BondVendors = vendorStrs
+			}
+		}
+
+		hosts = append(hosts, host)
+	}
+
+	// Sort by IP
+	ips := make([]string, len(hosts))
+	for i, h := range hosts {
+		ips[i] = h.IP
+	}
+	netutil.SortIPStrings(ips)
+	ipIndex := make(map[string]int)
+	for i, ip := range ips {
+		ipIndex[ip] = i
+	}
+	sorted := make([]models.HostEntry, len(hosts))
+	for _, h := range hosts {
+		sorted[ipIndex[h.IP]] = h
+	}
+
+	s.state.Mu.Lock()
+	// Preserve hosts from other IP versions (e.g. IPv4 from ARP)
+	var keep []models.HostEntry
+	for _, h := range s.state.Hosts {
+		if h.IPVersion != 6 {
+			keep = append(keep, h)
+		}
+	}
+	s.state.Hosts = append(keep, sorted...)
+	s.state.Mu.Unlock()
+}
+
+// processDHCPv6Results converts DHCPv6ServerInfo to DHCPv6ServerJSON
+func (s *Scanner) processDHCPv6Results(servers []models.DHCPv6ServerInfo) {
+	var result []models.DHCPv6ServerJSON
+	for _, srv := range servers {
+		entry := models.DHCPv6ServerJSON{
+			Preference:    srv.Preference,
+			ValidLifetime: srv.ValidLifetime,
+		}
+		if srv.ServerIP != nil {
+			entry.ServerIP = srv.ServerIP.String()
+		}
+		if srv.ServerMAC != nil {
+			entry.ServerMAC = strings.ToUpper(srv.ServerMAC.String())
+			if s.oui != nil {
+				entry.Vendor = s.oui.Lookup(srv.ServerMAC)
+			}
+		}
+		for _, dns := range srv.DNSServers {
+			entry.DNSServers = append(entry.DNSServers, dns.String())
+		}
+		entry.DomainSearch = srv.DomainSearch
+		result = append(result, entry)
+	}
+
+	s.state.Mu.Lock()
+	s.state.DHCPv6Servers = result
+	s.state.Mu.Unlock()
+
+	if s.alertMgr != nil && len(result) > 0 {
+		go s.alertMgr.SendDHCPv6Alerts(result)
+	}
+}
+
+// backgroundNDPMonitor continuously monitors NDP traffic for spoofing
+func (s *Scanner) backgroundNDPMonitor() {
+	if s.ndpResult == nil {
+		return
+	}
+
+	baseline := make(map[string][]string)
+	s.ndpResult.Mu.Lock()
+	for ip, macs := range s.ndpResult.Entries {
+		for _, m := range macs {
+			baseline[ip] = append(baseline[ip], m.String())
+		}
+	}
+	s.ndpResult.Mu.Unlock()
+
+	gatewayIPv6 := netutil.GetDefaultGatewayV6()
+
+	for {
+		select {
+		case <-s.bgStopCh:
+			return
+		default:
+		}
+
+		alerts, err := protocol.MonitorNDP(s.iface.Name, baseline, gatewayIPv6, 5*time.Second, s.bgStopCh)
+		if err != nil {
+			log.Printf("NDP 모니터 오류: %v", err)
+			continue
+		}
+		if len(alerts) > 0 {
+			var newNDPAlerts []models.NDPSpoofAlert
+			s.state.Mu.Lock()
+			for _, a := range alerts {
+				key := a.IP + ":" + a.NewMAC
+				merged := false
+				for i := range s.state.NDPAlerts {
+					eKey := s.state.NDPAlerts[i].IP + ":" + s.state.NDPAlerts[i].NewMAC
+					if eKey == key {
+						s.state.NDPAlerts[i].Count += a.Count
+						s.state.NDPAlerts[i].Timestamp = a.Timestamp
+						merged = true
+						break
+					}
+				}
+				if !merged {
+					s.state.NDPAlerts = append(s.state.NDPAlerts, a)
+					if !s.emailedNDPKeys[key] {
+						s.emailedNDPKeys[key] = true
+						newNDPAlerts = append(newNDPAlerts, a)
+					}
+				}
+			}
+			s.state.Mu.Unlock()
+			if s.alertMgr != nil && len(newNDPAlerts) > 0 {
+				go s.alertMgr.SendNDPAlerts(newNDPAlerts)
 			}
 		}
 	}

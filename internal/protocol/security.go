@@ -114,6 +114,105 @@ func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string
 	return alerts, nil
 }
 
+// MonitorNDP monitors NDP traffic for IPv6 spoofing indicators
+func MonitorNDP(ifaceName string, baseline map[string][]string, gatewayIPv6 string, duration time.Duration, stopCh <-chan struct{}) ([]models.NDPSpoofAlert, error) {
+	sock, err := netutil.NewRawSocket(ifaceName)
+	if err != nil {
+		return nil, fmt.Errorf("NDP 모니터 소켓 열기 실패: %v", err)
+	}
+	defer sock.Close()
+
+	if err := sock.SetBPFFilter(netutil.BPFFilterNDP()); err != nil {
+		return nil, fmt.Errorf("NDP 모니터 BPF 필터 설정 실패: %v", err)
+	}
+
+	alertIndex := make(map[string]int)
+	var alerts []models.NDPSpoofAlert
+	var mu sync.Mutex
+
+	deadline := time.Now().Add(duration)
+
+	for time.Now().Before(deadline) {
+		select {
+		case <-stopCh:
+			return alerts, nil
+		default:
+		}
+
+		data, err := sock.ReadPacket()
+		if err != nil || data == nil {
+			continue
+		}
+
+		packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
+
+		// Only process NA (type 136)
+		icmpLayer := packet.Layer(layers.LayerTypeICMPv6)
+		if icmpLayer == nil {
+			continue
+		}
+		icmp := icmpLayer.(*layers.ICMPv6)
+		if icmp.TypeCode.Type() != layers.ICMPv6TypeNeighborAdvertisement {
+			continue
+		}
+
+		naLayer := packet.Layer(layers.LayerTypeICMPv6NeighborAdvertisement)
+		if naLayer == nil {
+			continue
+		}
+		na := naLayer.(*layers.ICMPv6NeighborAdvertisement)
+
+		ethLayer := packet.Layer(layers.LayerTypeEthernet)
+		if ethLayer == nil {
+			continue
+		}
+		eth := ethLayer.(*layers.Ethernet)
+
+		ipStr := na.TargetAddress.String()
+		macStr := eth.SrcMAC.String()
+		now := time.Now()
+
+		mu.Lock()
+
+		if knownMACs, ok := baseline[ipStr]; ok {
+			found := false
+			for _, km := range knownMACs {
+				if km == macStr {
+					found = true
+					break
+				}
+			}
+			if !found {
+				key := ipStr + ":" + macStr
+				if idx, exists := alertIndex[key]; exists {
+					alerts[idx].Count++
+					alerts[idx].Timestamp = now.Format("2006-01-02 15:04:05")
+				} else {
+					severity := "warning"
+					if ipStr == gatewayIPv6 {
+						severity = "critical"
+					}
+					alertIndex[key] = len(alerts)
+					alerts = append(alerts, models.NDPSpoofAlert{
+						IP:        ipStr,
+						OldMAC:    strings.Join(knownMACs, ", "),
+						NewMAC:    macStr,
+						AlertType: "spoof",
+						Severity:  severity,
+						Count:     1,
+						FirstSeen: now.Format("2006-01-02 15:04:05"),
+						Timestamp: now.Format("2006-01-02 15:04:05"),
+					})
+				}
+			}
+		}
+
+		mu.Unlock()
+	}
+
+	return alerts, nil
+}
+
 // CheckDNSSpoofing queries multiple DNS servers and compares results
 func CheckDNSSpoofing(dnsServers []string) []models.DNSSpoofAlert {
 	if len(dnsServers) < 2 {

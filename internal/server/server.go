@@ -25,7 +25,7 @@ func StartWebServer(port int, sc *scanner.Scanner, alertMgr *alert.AlertManager,
 	if err != nil {
 		return fmt.Errorf("embed FS 오류: %v", err)
 	}
-	mux.Handle("/", http.FileServer(http.FS(webSub)))
+	mux.Handle("/", noCacheHandler(http.FileServer(http.FS(webSub))))
 
 	// API endpoints
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
@@ -138,6 +138,44 @@ func StartWebServer(port int, sc *scanner.Scanner, alertMgr *alert.AlertManager,
 		writeJSON(w, sc.GetDNSAlerts())
 	})
 
+	mux.HandleFunc("/api/security/ndp", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, sc.GetNDPAlerts())
+	})
+
+	mux.HandleFunc("/api/dhcpv6", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, sc.GetDHCPv6Servers())
+	})
+
+	mux.HandleFunc("/api/mode", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, map[string]string{"mode": string(sc.GetIPMode())})
+		case http.MethodPut:
+			var body struct {
+				Mode string `json:"mode"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, "Invalid JSON", http.StatusBadRequest)
+				return
+			}
+			mode := models.ParseIPMode(body.Mode)
+			sc.Stop()
+			sc.SetIPMode(mode)
+			sc.Start()
+			writeJSON(w, map[string]string{"status": "ok", "mode": string(mode)})
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
 	mux.HandleFunc("/api/interfaces", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -227,6 +265,15 @@ func writeJSON(w http.ResponseWriter, data interface{}) {
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		log.Printf("JSON encode error: %v", err)
 	}
+}
+
+func noCacheHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func logMiddleware(next http.Handler) http.Handler {

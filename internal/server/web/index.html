@@ -460,6 +460,10 @@ tr.subnet-header:hover { background: var(--primary-light); }
   <div class="header-controls">
     <button id="btnScan" class="btn btn-primary" onclick="startScan()" data-i18n="btn_scan">Start Scan</button>
     <button id="btnStop" class="btn btn-danger" onclick="stopScan()" disabled data-i18n="btn_stop">Stop Scan</button>
+    <select id="viewSelect" class="lang-select" onchange="setDisplayMode(this.value)">
+      <option value="ipv4">IPv4</option>
+      <option value="ipv6">IPv6</option>
+    </select>
     <button class="btn btn-warning" onclick="openAlertModal()" data-i18n="btn_alert_config">Alert Settings</button>
     <select id="langSelect" class="lang-select" onchange="setLanguage(this.value)">
       <option value="en">EN</option>
@@ -537,6 +541,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
 
     <!-- DHCP Panel -->
     <div class="panel" id="panel-dhcp">
+      <div id="section-dhcpv4">
       <div style="overflow-x:auto">
       <table id="dhcp-table">
         <thead>
@@ -555,6 +560,28 @@ tr.subnet-header:hover { background: var(--primary-light); }
       </table>
       </div>
       <div class="empty-state" id="empty-dhcp"><p data-i18n="empty_dhcp">No DHCP servers detected.</p></div>
+      </div>
+
+      <div id="section-dhcpv6" style="display:none">
+      <h3 style="margin:24px 0 12px" data-i18n="h_dhcpv6_servers">DHCPv6 Servers</h3>
+      <div style="overflow-x:auto">
+      <table id="dhcpv6-table">
+        <thead>
+          <tr>
+            <th onclick="sortTable('dhcpv6-table',0)" data-i18n="th_server_ip">Server IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcpv6-table',1)" data-i18n="th_server_mac">Server MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcpv6-table',2)" data-i18n="th_vendor">Vendor<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcpv6-table',3)">DNS<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcpv6-table',4)" data-i18n="th_domain_list">Domains<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcpv6-table',5)" data-i18n="th_preference">Preference<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('dhcpv6-table',6)" data-i18n="th_valid_life">Valid Lifetime<span class="sort-arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="empty-state" id="empty-dhcpv6"><p data-i18n="empty_dhcpv6">No DHCPv6 servers detected.</p></div>
+      </div>
     </div>
 
     <!-- HSRP/VRRP Panel -->
@@ -644,6 +671,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
 
     <!-- Security Panel -->
     <div class="panel" id="panel-security">
+      <div id="section-arp-alerts">
       <h3 style="margin-bottom:12px" data-i18n="h_arp_alerts">ARP Spoofing Alerts</h3>
       <div style="overflow-x:auto">
       <table id="arp-alert-table">
@@ -662,7 +690,9 @@ tr.subnet-header:hover { background: var(--primary-light); }
       </table>
       </div>
       <div class="empty-state" id="empty-arp-alert"><p data-i18n="empty_arp">No ARP spoofing alerts.</p></div>
+      </div>
 
+      <div id="section-dns-alerts">
       <h3 style="margin:24px 0 12px" data-i18n="h_dns_alerts">DNS Spoofing Alerts</h3>
       <div style="overflow-x:auto">
       <table id="dns-alert-table">
@@ -679,6 +709,28 @@ tr.subnet-header:hover { background: var(--primary-light); }
       </table>
       </div>
       <div class="empty-state" id="empty-dns-alert"><p data-i18n="empty_dns">No DNS spoofing alerts.</p></div>
+      </div>
+
+      <div id="section-ndp-alerts" style="display:none">
+      <h3 style="margin:24px 0 12px" data-i18n="h_ndp_alerts">NDP Spoofing Alerts</h3>
+      <div style="overflow-x:auto">
+      <table id="ndp-alert-table">
+        <thead>
+          <tr>
+            <th onclick="sortTable('ndp-alert-table',0)" data-i18n="th_severity">Severity<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',1)" data-i18n="th_target_ip">Target IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',2)" data-i18n="th_known_mac">Known MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',3)" data-i18n="th_attack_mac">Attacker MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',4)" data-i18n="th_packets">Packets<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',5)" data-i18n="th_first_seen">First Seen<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',6)" data-i18n="th_last_seen">Last Seen<span class="sort-arrow"></span></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      </div>
+      <div class="empty-state" id="empty-ndp-alert"><p data-i18n="empty_ndp">No NDP spoofing alerts.</p></div>
+      </div>
     </div>
   </div>
 </div>
@@ -691,13 +743,19 @@ tr.subnet-header:hover { background: var(--primary-light); }
       <button onclick="closeAlertModal()">&times;</button>
     </div>
     <div class="modal-body">
+      <div style="display:flex;gap:4px;margin-bottom:12px">
+        <button type="button" id="alertTabV4" class="btn-sm btn-primary" onclick="setAlertTab('v4')">IPv4</button>
+        <button type="button" id="alertTabV6" class="btn-sm" onclick="setAlertTab('v6')">IPv6</button>
+      </div>
       <div class="form-group">
         <label class="form-label" data-i18n="alert_subnets">Subnets to monitor</label>
-        <div class="subnet-select" id="alertSubnetList"></div>
+        <div class="subnet-select" id="alertSubnetListV4"></div>
+        <div class="subnet-select" id="alertSubnetListV6" style="display:none"></div>
       </div>
       <div class="form-group">
         <label class="form-label" data-i18n="alert_events">Alert Events</label>
-        <div class="subnet-select" id="alertEventList"></div>
+        <div class="subnet-select" id="alertEventListV4"></div>
+        <div class="subnet-select" id="alertEventListV6" style="display:none"></div>
       </div>
       <div class="form-group"><label class="form-label required" data-i18n="alert_smtp_from">From (Sender)</label><input class="form-input" id="alertSmtpFrom" placeholder="alert@example.com" required></div>
       <div class="form-group"><label class="form-label required" data-i18n="alert_smtp_to">Recipient</label><input class="form-input" id="alertSmtpTo" placeholder="admin@example.com" required></div>
@@ -780,6 +838,14 @@ const i18n = {
     h_cdp: 'CDP Neighbors',
     h_arp_alerts: 'ARP Spoofing Alerts',
     h_dns_alerts: 'DNS Spoofing Alerts',
+    h_ndp_alerts: 'NDP Spoofing Alerts',
+    h_dhcpv6_servers: 'DHCPv6 Servers',
+    mode_both: 'Both',
+    mode_ipv4: 'IPv4',
+    mode_ipv6: 'IPv6',
+    th_domain_list: 'Domains',
+    th_preference: 'Preference',
+    th_valid_life: 'Valid Lifetime',
     empty_hosts: 'Discovered hosts will appear here once scanning starts.',
     empty_conflicts: 'No IP conflicts detected.',
     empty_dhcp: 'No DHCP servers detected.',
@@ -789,6 +855,8 @@ const i18n = {
     empty_cdp: 'No CDP neighbors detected.',
     empty_arp: 'No ARP spoofing alerts.',
     empty_dns: 'No DNS spoofing alerts.',
+    empty_ndp: 'No NDP spoofing alerts.',
+    empty_dhcpv6: 'No DHCPv6 servers detected.',
     hosts_count_one: ' host',
     hosts_count_other: ' hosts',
     items_count_one: ' item',
@@ -800,9 +868,11 @@ const i18n = {
     lease_day: 'd',
     prog_oui_loading: 'Loading OUI database...',
     prog_oui_done: 'OUI loaded ({0} vendors)',
-    prog_scan_parallel: 'Parallel scanning (ARP, DHCP, HSRP/VRRP/LLDP/CDP)...',
-    prog_scan_arp_done: 'ARP done ({0} hosts), resolving hostnames...',
+    prog_scan_parallel: 'Parallel scanning (ARP/NDP, DHCP/DHCPv6, HSRP/VRRP/LLDP/CDP)...',
+    prog_scan_arp_done: 'ARP done ({0} hosts)',
+    prog_scan_ndp_done: 'NDP done ({0} hosts)',
     prog_scan_done: 'Scan complete',
+    prog_hostname_resolving: 'Resolving hostnames ({0} hosts)...',
     select_all: 'All',
     btn_alert_config: 'Alert Settings',
     alert_title: 'Alert Settings',
@@ -831,6 +901,8 @@ const i18n = {
     alert_event_lldp_cdp: 'LLDP/CDP',
     alert_event_arp: 'ARP Spoofing',
     alert_event_dns: 'DNS Spoofing',
+    alert_event_ndp: 'NDP Spoofing',
+    alert_event_dhcpv6: 'DHCPv6 Servers',
     alert_required_fields: 'From, Recipient and SMTP Host are required',
     alert_test_ok: 'Test alert sent successfully',
     alert_test_fail: 'Test failed: {0}',
@@ -891,6 +963,14 @@ const i18n = {
     h_cdp: 'CDP 이웃',
     h_arp_alerts: 'ARP 스푸핑 알림',
     h_dns_alerts: 'DNS 스푸핑 알림',
+    h_ndp_alerts: 'NDP 스푸핑 알림',
+    h_dhcpv6_servers: 'DHCPv6 서버',
+    mode_both: '전체',
+    mode_ipv4: 'IPv4',
+    mode_ipv6: 'IPv6',
+    th_domain_list: '도메인 목록',
+    th_preference: '우선순위',
+    th_valid_life: '유효 수명',
     empty_hosts: '스캔을 시작하면 발견된 호스트가 여기에 표시됩니다.',
     empty_conflicts: 'IP 충돌이 감지되지 않았습니다.',
     empty_dhcp: 'DHCP 서버가 감지되지 않았습니다.',
@@ -900,6 +980,8 @@ const i18n = {
     empty_cdp: 'CDP 이웃이 감지되지 않았습니다.',
     empty_arp: 'ARP 스푸핑 알림이 없습니다.',
     empty_dns: 'DNS 스푸핑 알림이 없습니다.',
+    empty_ndp: 'NDP 스푸핑 알림이 없습니다.',
+    empty_dhcpv6: 'DHCPv6 서버가 감지되지 않았습니다.',
     hosts_count_one: '개 호스트',
     hosts_count_other: '개 호스트',
     items_count_one: '건',
@@ -911,9 +993,11 @@ const i18n = {
     lease_day: '일',
     prog_oui_loading: 'OUI 데이터베이스 로드 중...',
     prog_oui_done: 'OUI 로드 완료 ({0}개 벤더)',
-    prog_scan_parallel: '병렬 스캔 중 (ARP, DHCP, HSRP/VRRP/LLDP/CDP)...',
-    prog_scan_arp_done: 'ARP 완료 ({0}개 호스트), 호스트명 해석 중...',
+    prog_scan_parallel: '병렬 스캔 중 (ARP/NDP, DHCP/DHCPv6, HSRP/VRRP/LLDP/CDP)...',
+    prog_scan_arp_done: 'ARP 완료 ({0}개 호스트)',
+    prog_scan_ndp_done: 'NDP 완료 ({0}개 호스트)',
     prog_scan_done: '스캔 완료',
+    prog_hostname_resolving: '호스트명 해석 중 ({0}개 호스트)...',
     select_all: '전체',
     btn_alert_config: '알림 설정',
     alert_title: '알림 설정',
@@ -942,6 +1026,8 @@ const i18n = {
     alert_event_lldp_cdp: 'LLDP/CDP 발견',
     alert_event_arp: 'ARP 스푸핑',
     alert_event_dns: 'DNS 스푸핑',
+    alert_event_ndp: 'NDP 스푸핑',
+    alert_event_dhcpv6: 'DHCPv6 서버',
     alert_required_fields: '보내는 주소, 수신자, SMTP 호스트는 필수 항목입니다',
     alert_test_ok: '테스트 알림 발송 성공',
     alert_test_fail: '테스트 실패: {0}',
@@ -1002,6 +1088,7 @@ function initLanguage() {
 // ── State ──
 let currentTab = 'hosts';
 let pollTimer = null;
+let displayMode = 'ipv4';
 
 // Raw data (kept across polls so render can use sort/collapse state)
 let rawHosts = [];
@@ -1021,6 +1108,7 @@ const enabledSubnets = { hosts: new Set(), conflicts: new Set() };
 // Track known subnets to detect changes
 let knownSubnets = { hosts: [], conflicts: [] };
 let scannerSubnets = []; // subnets configured in scanner
+let scannerIPMode = 'both'; // ipv4, ipv6, both
 
 // Sort state per table: { col, asc } or null
 const activeSort = {};
@@ -1065,14 +1153,14 @@ async function stopScan() {
 }
 
 // ── Polling ──
-async function fetchJSON(url) { const r = await fetch(url); return r.json(); }
+async function fetchJSON(url) { try { const r = await fetch(url); return await r.json(); } catch(e) { return []; } }
 
 async function pollData() {
   try {
     const status = await fetchJSON('/api/status');
     updateStatus(status);
 
-    const [hosts, conflicts, dhcp, hsrp, vrrp, lldp, cdp, arpAlerts, dnsAlerts] = await Promise.all([
+    const [hosts, conflicts, dhcp, hsrp, vrrp, lldp, cdp, arpAlerts, dnsAlerts, dhcpv6, ndpAlerts] = await Promise.all([
       fetchJSON('/api/hosts'),
       fetchJSON('/api/conflicts'),
       fetchJSON('/api/dhcp'),
@@ -1081,15 +1169,22 @@ async function pollData() {
       fetchJSON('/api/lldp'),
       fetchJSON('/api/cdp'),
       fetchJSON('/api/security/arp'),
-      fetchJSON('/api/security/dns')
+      fetchJSON('/api/security/dns'),
+      fetchJSON('/api/dhcpv6'),
+      fetchJSON('/api/security/ndp')
     ]);
 
-    rawHosts = hosts || [];
-    rawConflicts = conflicts || [];
+    const allHosts = hosts || [];
+    const allConflicts = conflicts || [];
+    const showV6 = displayMode === 'ipv6';
 
-    // Build MAC→IP lookup from hosts
+    // Filter by display mode
+    rawHosts = allHosts.filter(h => showV6 ? isIPv6(h.ip) : !isIPv6(h.ip));
+    rawConflicts = allConflicts.filter(c => showV6 ? isIPv6(c.ip) : !isIPv6(c.ip));
+
+    // Build MAC→IP lookup from all hosts
     macToIP = {};
-    rawHosts.forEach(h => {
+    allHosts.forEach(h => {
       macToIP[h.mac.toUpperCase()] = h.ip;
       if (h.bondMACs) h.bondMACs.forEach(m => { macToIP[m.toUpperCase()] = h.ip; });
     });
@@ -1108,18 +1203,36 @@ async function pollData() {
 
     renderHostsTable();
     renderConflictsTable();
-    renderSimpleTable('dhcp-table', 'empty-dhcp', dhcp, renderDHCPRow);
-    renderSimpleTable('hsrp-table', 'empty-hsrp', hsrp, renderHSRPRow);
-    renderSimpleTable('vrrp-table', 'empty-vrrp', vrrp, renderVRRPRow);
+    const ipFilter = ip => showV6 ? isIPv6(ip) : !isIPv6(ip);
+    renderSimpleTable('hsrp-table', 'empty-hsrp', (hsrp||[]).filter(e => ipFilter(e.sourceIP)), renderHSRPRow);
+    renderSimpleTable('vrrp-table', 'empty-vrrp', (vrrp||[]).filter(e => ipFilter(e.sourceIP)), renderVRRPRow);
 
-    // LLDP/CDP: default sort by device ID
-    const sortedLLDP = [...(lldp||[])].sort((a,b) => (a.chassisID||'').localeCompare(b.chassisID||''));
-    const sortedCDP = [...(cdp||[])].sort((a,b) => (a.deviceID||'').localeCompare(b.deviceID||''));
+    // LLDP: filter by mgmtAddr, CDP: filter by addresses
+    const sortedLLDP = [...(lldp||[])].filter(e => {
+      const addr = e.mgmtAddr || lookupMAC(e.sourceMAC) || lookupMAC(e.chassisID) || '';
+      return !addr || ipFilter(addr);
+    }).sort((a,b) => (a.chassisID||'').localeCompare(b.chassisID||''));
+    const sortedCDP = [...(cdp||[])].filter(e => {
+      const addrs = e.addresses || [];
+      if (addrs.length === 0) { const ip = lookupMAC(e.sourceMAC); return !ip || ipFilter(ip); }
+      return addrs.some(ipFilter);
+    }).sort((a,b) => (a.deviceID||'').localeCompare(b.deviceID||''));
     renderSimpleTable('lldp-table', 'empty-lldp', sortedLLDP, renderLLDPRow);
     renderSimpleTable('cdp-table', 'empty-cdp', sortedCDP, renderCDPRow);
+
+    // Show/hide sections based on display mode
+    document.getElementById('section-dhcpv4').style.display = showV6 ? 'none' : '';
+    document.getElementById('section-dhcpv6').style.display = showV6 ? '' : 'none';
+    document.getElementById('section-arp-alerts').style.display = showV6 ? 'none' : '';
+    document.getElementById('section-ndp-alerts').style.display = showV6 ? '' : 'none';
+    const visibleDHCP = showV6 ? (dhcpv6||[]) : (dhcp||[]);
+    const visibleSecurity = showV6 ? (ndpAlerts||[]) : (arpAlerts||[]);
+    renderSimpleTable('dhcp-table', 'empty-dhcp', dhcp, renderDHCPRow);
+    renderSimpleTable('dhcpv6-table', 'empty-dhcpv6', dhcpv6, renderDHCPv6Row);
     renderSimpleTable('arp-alert-table', 'empty-arp-alert', arpAlerts, renderARPAlertRow);
+    renderSimpleTable('ndp-alert-table', 'empty-ndp-alert', ndpAlerts, renderNDPAlertRow);
     renderSimpleTable('dns-alert-table', 'empty-dns-alert', dnsAlerts, renderDNSAlertRow);
-    updateBadges(rawHosts, rawConflicts, dhcp, arpAlerts, dnsAlerts);
+    updateBadges(rawHosts, rawConflicts, visibleDHCP, visibleSecurity, dnsAlerts);
   } catch(e) { console.error('Poll error:', e); }
 }
 
@@ -1145,13 +1258,17 @@ function updateStatus(data) {
   document.getElementById('btnScan').disabled = data.status === 'running';
   document.getElementById('btnStop').disabled = data.status !== 'running';
   if (data.subnets && data.subnets.length > 0) scannerSubnets = data.subnets;
+  if (data.ipMode && data.ipMode !== scannerIPMode) {
+    scannerIPMode = data.ipMode;
+    updateViewSelector();
+  }
 }
 
-function updateBadges(hosts, conflicts, dhcp, arpAlerts, dnsAlerts) {
+function updateBadges(hosts, conflicts, dhcp, securityAlerts, dnsAlerts) {
   setBadge('badge-hosts', hosts.length);
   setBadge('badge-conflicts', conflicts.length);
-  setBadge('badge-dhcp', dhcp.length);
-  setBadge('badge-security', arpAlerts.length + dnsAlerts.length);
+  setBadge('badge-dhcp', (dhcp||[]).length);
+  setBadge('badge-security', (securityAlerts||[]).length + (dnsAlerts||[]).length);
 }
 function setBadge(id, count) {
   const el = document.getElementById(id);
@@ -1204,11 +1321,23 @@ function renderSubnetFilter(panelKey, subnets) {
     + ' onchange="toggleAllSubnets(\'' + panelKey + '\', this.checked)">'
     + ' ' + esc(t('select_all')) + '</label>';
 
-  for (const subnet of subnets) {
-    html += '<label><input type="checkbox" data-panel="' + panelKey + '" data-subnet="' + escAttr(subnet) + '"'
-      + (enabled.has(subnet) ? ' checked' : '')
-      + ' onchange="toggleSubnetFilter(\'' + panelKey + '\',\'' + escAttr(subnet) + '\', this.checked)">'
-      + ' ' + esc(subnet) + '</label>';
+  const v4 = subnets.filter(s => !isIPv6(s.split('/')[0]));
+  const v6 = subnets.filter(s => isIPv6(s.split('/')[0]));
+  const renderCbs = (list) => {
+    for (const subnet of list) {
+      html += '<label><input type="checkbox" data-panel="' + panelKey + '" data-subnet="' + escAttr(subnet) + '"'
+        + (enabled.has(subnet) ? ' checked' : '')
+        + ' onchange="toggleSubnetFilter(\'' + panelKey + '\',\'' + escAttr(subnet) + '\', this.checked)">'
+        + ' ' + esc(subnet) + '</label>';
+    }
+  };
+  if (v4.length > 0 && v6.length > 0) {
+    html += '<span style="font-size:11px;font-weight:600;color:var(--text-secondary)">IPv4</span>';
+    renderCbs(v4);
+    html += '<span style="font-size:11px;font-weight:600;color:var(--text-secondary)">IPv6</span>';
+    renderCbs(v6);
+  } else {
+    renderCbs(subnets);
   }
   container.innerHTML = html;
 
@@ -1420,6 +1549,34 @@ function renderARPAlertRow(a) {
 function renderDNSAlertRow(a) {
   return `<tr class="severity-${a.severity}"><td><span class="text-${a.severity==='critical'?'danger':'warning'}">${a.severity.toUpperCase()}</span></td><td>${esc(a.alertType)}</td><td>${esc(a.domain)}</td><td>${esc(a.message)}</td><td>${esc(a.timestamp)}</td></tr>`;
 }
+function renderDHCPv6Row(s) {
+  return `<tr><td>${esc(s.serverIP)}</td><td class="mac-cell">${esc(s.serverMAC)}</td><td>${esc(s.vendor)}</td><td>${(s.dnsServers||[]).map(esc).join(', ')}</td><td>${(s.domainSearch||[]).map(esc).join(', ')}</td><td>${s.preference}</td><td>${formatLease(s.validLifetime)}</td></tr>`;
+}
+function renderNDPAlertRow(a) {
+  const sevClass = a.severity==='critical'?'danger':'warning';
+  return `<tr class="severity-${a.severity}"><td><span class="text-${sevClass}">${a.severity.toUpperCase()}</span></td><td>${esc(a.ip)}</td><td class="mac-cell">${esc(a.oldMAC)}</td><td class="mac-cell">${esc(a.newMAC)}</td><td><strong>${a.count||1}</strong></td><td>${esc(a.firstSeen||a.timestamp)}</td><td>${esc(a.timestamp)}</td></tr>`;
+}
+
+// ── Display mode filter ──
+function isIPv6(ip) { return ip && ip.indexOf(':') !== -1; }
+function setDisplayMode(mode) {
+  displayMode = mode;
+  document.getElementById('viewSelect').value = mode;
+  pollData();
+}
+
+function updateViewSelector() {
+  const sel = document.getElementById('viewSelect');
+  if (scannerIPMode === 'ipv4') {
+    sel.style.display = 'none';
+    setDisplayMode('ipv4');
+  } else if (scannerIPMode === 'ipv6') {
+    sel.style.display = 'none';
+    setDisplayMode('ipv6');
+  } else {
+    sel.style.display = '';
+  }
+}
 
 // ── Helpers ──
 function esc(s) {
@@ -1436,12 +1593,18 @@ function formatLease(seconds) {
   if (seconds < 86400) return Math.floor(seconds/3600) + t('lease_hour') + Math.floor((seconds%3600)/60) + t('lease_min');
   return Math.floor(seconds/86400) + t('lease_day');
 }
-function isIP(s) { return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/.test(s); }
+function isIP(s) { return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/.test(s) || /^[0-9a-fA-F:]+:[0-9a-fA-F:]*$/.test(s); }
 function compareIP(a, b) {
-  const pa = (a||'0.0.0.0').split('.').map(Number);
-  const pb = (b||'0.0.0.0').split('.').map(Number);
-  for (let i = 0; i < 4; i++) { if (pa[i] !== pb[i]) return pa[i] - pb[i]; }
-  return 0;
+  a = a || ''; b = b || '';
+  const a4 = /^\d{1,3}\./.test(a), b4 = /^\d{1,3}\./.test(b);
+  if (a4 && b4) {
+    const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+    for (let i = 0; i < 4; i++) { if ((pa[i]||0) !== (pb[i]||0)) return (pa[i]||0) - (pb[i]||0); }
+    return 0;
+  }
+  if (a4 && !b4) return -1;
+  if (!a4 && b4) return 1;
+  return a.localeCompare(b);
 }
 function fieldCompare(va, vb, asc) {
   if (isIP(va) && isIP(vb)) return asc ? compareIP(va, vb) : compareIP(vb, va);
@@ -1514,23 +1677,57 @@ function filterTable(tableId, query) {
 
 // ── Alert Modal ──
 let editingAlertId = null;
+let editingOriginalCfg = null;
 
 function getAlertSubnets() {
   return (scannerSubnets.length > 0 ? scannerSubnets : (knownSubnets.hosts.length > 0 ? knownSubnets.hosts : knownSubnets.conflicts))
     .slice().sort((a, b) => { const pa = a.split('/')[0]||'', pb = b.split('/')[0]||''; return isIP(pa) && isIP(pb) ? compareIP(pa, pb) : a.localeCompare(b); });
 }
 
-function populateAlertSubnets(selectedSubnets) {
-  const container = document.getElementById('alertSubnetList');
+function populateAlertSubnets(selectedV4, selectedV6) {
   const subnets = getAlertSubnets();
-  const isAll = !selectedSubnets || selectedSubnets.length === 0;
-  let html = '<label><input type="checkbox" id="alertSubnetAll"' + (isAll ? ' checked' : '') + ' onchange="toggleAlertSubnetsAll(this.checked)"> ' + esc(t('alert_subnets_all')) + '</label>';
-  for (const s of subnets) {
-    const checked = isAll || selectedSubnets.includes(s);
-    html += '<label><input type="checkbox" class="alert-subnet-cb" value="' + escAttr(s) + '"' + (checked ? ' checked' : '') + ' onchange="updateAlertSubnetAll()"> ' + esc(s) + '</label>';
+  const v4List = subnets.filter(s => !isIPv6(s.split('/')[0]));
+  const v6List = subnets.filter(s => isIPv6(s.split('/')[0]));
+  // V4
+  const containerV4 = document.getElementById('alertSubnetListV4');
+  const isAllV4 = !selectedV4 || selectedV4.length === 0;
+  let htmlV4 = '<label><input type="checkbox" id="alertSubnetAllV4"' + (isAllV4 ? ' checked' : '') + ' onchange="toggleAlertSubnetsAllFor(\'v4\', this.checked)"> ' + esc(t('alert_subnets_all')) + '</label>';
+  for (const s of v4List) {
+    const checked = isAllV4 || selectedV4.includes(s);
+    htmlV4 += '<label><input type="checkbox" class="alert-subnet-cb-v4" value="' + escAttr(s) + '"' + (checked ? ' checked' : '') + ' onchange="updateAlertSubnetAllFor(\'v4\')"> ' + esc(s) + '</label>';
   }
-  container.innerHTML = html;
-  if (!isAll) updateAlertSubnetAll();
+  containerV4.innerHTML = htmlV4;
+  if (!isAllV4) updateAlertSubnetAllFor('v4');
+  // V6
+  const containerV6 = document.getElementById('alertSubnetListV6');
+  const isAllV6 = !selectedV6 || selectedV6.length === 0;
+  let htmlV6 = '<label><input type="checkbox" id="alertSubnetAllV6"' + (isAllV6 ? ' checked' : '') + ' onchange="toggleAlertSubnetsAllFor(\'v6\', this.checked)"> ' + esc(t('alert_subnets_all')) + '</label>';
+  for (const s of v6List) {
+    const checked = isAllV6 || selectedV6.includes(s);
+    htmlV6 += '<label><input type="checkbox" class="alert-subnet-cb-v6" value="' + escAttr(s) + '"' + (checked ? ' checked' : '') + ' onchange="updateAlertSubnetAllFor(\'v6\')"> ' + esc(s) + '</label>';
+  }
+  containerV6.innerHTML = htmlV6;
+  if (!isAllV6) updateAlertSubnetAllFor('v6');
+}
+
+function setAlertTab(tab) {
+  const btnV4 = document.getElementById('alertTabV4');
+  const btnV6 = document.getElementById('alertTabV6');
+  const sListV4 = document.getElementById('alertSubnetListV4');
+  const sListV6 = document.getElementById('alertSubnetListV6');
+  const eListV4 = document.getElementById('alertEventListV4');
+  const eListV6 = document.getElementById('alertEventListV6');
+  if (tab === 'v6') {
+    btnV6.className = 'btn-sm btn-primary';
+    btnV4.className = 'btn-sm';
+    sListV6.style.display = ''; sListV4.style.display = 'none';
+    eListV6.style.display = ''; eListV4.style.display = 'none';
+  } else {
+    btnV4.className = 'btn-sm btn-primary';
+    btnV6.className = 'btn-sm';
+    sListV4.style.display = ''; sListV6.style.display = 'none';
+    eListV4.style.display = ''; eListV6.style.display = 'none';
+  }
 }
 
 function setEditMode(editing) {
@@ -1550,6 +1747,7 @@ function setEditMode(editing) {
 
 function resetAlertForm() {
   editingAlertId = null;
+  editingOriginalCfg = null;
   document.getElementById('alertSmtpFrom').value = '';
   document.getElementById('alertSmtpHost').value = '';
   document.getElementById('alertSmtpPort').value = '465';
@@ -1560,9 +1758,25 @@ function resetAlertForm() {
   document.getElementById('alertSmtpPass').value = '';
   document.getElementById('alertSmtpTo').value = '';
   document.getElementById('alertMsg').innerHTML = '';
-  populateAlertSubnets(null);
-  populateAlertEvents(null);
+  populateAlertSubnets(null, null);
+  populateAlertEvents(null, null);
+  updateAlertTabVisibility();
   setEditMode(false);
+}
+
+function updateAlertTabVisibility() {
+  const btnV4 = document.getElementById('alertTabV4');
+  const btnV6 = document.getElementById('alertTabV6');
+  if (scannerIPMode === 'ipv4') {
+    btnV4.style.display = ''; btnV6.style.display = 'none';
+    setAlertTab('v4');
+  } else if (scannerIPMode === 'ipv6') {
+    btnV4.style.display = 'none'; btnV6.style.display = '';
+    setAlertTab('v6');
+  } else {
+    btnV4.style.display = ''; btnV6.style.display = '';
+    setAlertTab('v4');
+  }
 }
 
 function openAlertModal() {
@@ -1592,17 +1806,17 @@ function onAuthChange() {
   document.getElementById('alertFieldsAuth').style.display = document.getElementById('alertSmtpAuth').checked ? '' : 'none';
 }
 
-function toggleAlertSubnetsAll(checked) {
-  document.querySelectorAll('.alert-subnet-cb').forEach(cb => cb.checked = checked);
-  const allCb = document.getElementById('alertSubnetAll');
+function toggleAlertSubnetsAllFor(ver, checked) {
+  document.querySelectorAll('.alert-subnet-cb-' + ver).forEach(cb => cb.checked = checked);
+  const allCb = document.getElementById('alertSubnetAll' + ver.toUpperCase());
   if (allCb) { allCb.checked = checked; allCb.indeterminate = false; }
 }
 
-function updateAlertSubnetAll() {
-  const cbs = document.querySelectorAll('.alert-subnet-cb');
-  const allCb = document.getElementById('alertSubnetAll');
+function updateAlertSubnetAllFor(ver) {
+  const cbs = document.querySelectorAll('.alert-subnet-cb-' + ver);
+  const allCb = document.getElementById('alertSubnetAll' + ver.toUpperCase());
   if (!allCb || cbs.length === 0) return;
-  const checkedCount = document.querySelectorAll('.alert-subnet-cb:checked').length;
+  const checkedCount = document.querySelectorAll('.alert-subnet-cb-' + ver + ':checked').length;
   if (checkedCount === cbs.length) {
     allCb.checked = true;
     allCb.indeterminate = false;
@@ -1615,33 +1829,39 @@ function updateAlertSubnetAll() {
   }
 }
 
-const alertEventKeys = ['hosts', 'conflicts', 'dhcp', 'hsrp_vrrp', 'lldp_cdp', 'arp_spoofing', 'dns_spoofing'];
+const alertEventKeysV4 = ['hosts', 'conflicts', 'dhcp', 'hsrp_vrrp', 'lldp_cdp', 'arp_spoofing', 'dns_spoofing'];
+const alertEventKeysV6 = ['hosts', 'conflicts', 'dhcpv6', 'ndp_spoofing'];
 
-const alertEventI18n = { hosts:'alert_event_hosts', conflicts:'alert_event_conflicts', dhcp:'alert_event_dhcp', hsrp_vrrp:'alert_event_hsrp_vrrp', lldp_cdp:'alert_event_lldp_cdp', arp_spoofing:'alert_event_arp', dns_spoofing:'alert_event_dns' };
+const alertEventI18n = { hosts:'alert_event_hosts', conflicts:'alert_event_conflicts', dhcp:'alert_event_dhcp', dhcpv6:'alert_event_dhcpv6', hsrp_vrrp:'alert_event_hsrp_vrrp', lldp_cdp:'alert_event_lldp_cdp', arp_spoofing:'alert_event_arp', dns_spoofing:'alert_event_dns', ndp_spoofing:'alert_event_ndp' };
 
-function populateAlertEvents(selectedEvents) {
-  const container = document.getElementById('alertEventList');
-  const isAll = !selectedEvents || selectedEvents.length === 0;
-  let html = '<label><input type="checkbox" id="alertEventAll"' + (isAll ? ' checked' : '') + ' onchange="toggleAlertEventsAll(this.checked)"> ' + esc(t('alert_events_all')) + '</label>';
-  for (const key of alertEventKeys) {
-    const checked = isAll || selectedEvents.includes(key);
-    html += '<label><input type="checkbox" class="alert-event-cb" value="' + escAttr(key) + '"' + (checked ? ' checked' : '') + ' onchange="updateAlertEventAll()"> ' + esc(t(alertEventI18n[key])) + '</label>';
-  }
-  container.innerHTML = html;
-  if (!isAll) updateAlertEventAll();
+function populateAlertEvents(selectedV4, selectedV6) {
+  populateAlertEventsFor('v4', alertEventKeysV4, selectedV4);
+  populateAlertEventsFor('v6', alertEventKeysV6, selectedV6);
 }
 
-function toggleAlertEventsAll(checked) {
-  document.querySelectorAll('.alert-event-cb').forEach(cb => cb.checked = checked);
-  const allCb = document.getElementById('alertEventAll');
+function populateAlertEventsFor(ver, keys, selected) {
+  const container = document.getElementById('alertEventList' + ver.toUpperCase());
+  const isAll = !selected || selected.length === 0;
+  let html = '<label><input type="checkbox" id="alertEventAll' + ver.toUpperCase() + '"' + (isAll ? ' checked' : '') + ' onchange="toggleAlertEventsAllFor(\'' + ver + '\', this.checked)"> ' + esc(t('alert_events_all')) + '</label>';
+  for (const key of keys) {
+    const checked = isAll || selected.includes(key);
+    html += '<label><input type="checkbox" class="alert-event-cb-' + ver + '" value="' + escAttr(key) + '"' + (checked ? ' checked' : '') + ' onchange="updateAlertEventAllFor(\'' + ver + '\')"> ' + esc(t(alertEventI18n[key])) + '</label>';
+  }
+  container.innerHTML = html;
+  if (!isAll) updateAlertEventAllFor(ver);
+}
+
+function toggleAlertEventsAllFor(ver, checked) {
+  document.querySelectorAll('.alert-event-cb-' + ver).forEach(cb => cb.checked = checked);
+  const allCb = document.getElementById('alertEventAll' + ver.toUpperCase());
   if (allCb) { allCb.checked = checked; allCb.indeterminate = false; }
 }
 
-function updateAlertEventAll() {
-  const cbs = document.querySelectorAll('.alert-event-cb');
-  const allCb = document.getElementById('alertEventAll');
+function updateAlertEventAllFor(ver) {
+  const cbs = document.querySelectorAll('.alert-event-cb-' + ver);
+  const allCb = document.getElementById('alertEventAll' + ver.toUpperCase());
   if (!allCb || cbs.length === 0) return;
-  const checkedCount = document.querySelectorAll('.alert-event-cb:checked').length;
+  const checkedCount = document.querySelectorAll('.alert-event-cb-' + ver + ':checked').length;
   if (checkedCount === cbs.length) {
     allCb.checked = true;
     allCb.indeterminate = false;
@@ -1665,24 +1885,52 @@ function getAlertFormData() {
     else document.getElementById('alertSmtpHost').focus();
     return null;
   }
-  const cbs = document.querySelectorAll('.alert-subnet-cb');
-  const checkedCount = document.querySelectorAll('.alert-subnet-cb:checked').length;
-  const allChecked = cbs.length > 0 && checkedCount === cbs.length;
-  let subnets = [];
-  if (!allChecked) {
-    document.querySelectorAll('.alert-subnet-cb:checked').forEach(cb => subnets.push(cb.value));
+  // Collect IPv4 subnets
+  const cbsV4 = document.querySelectorAll('.alert-subnet-cb-v4');
+  const checkedV4 = document.querySelectorAll('.alert-subnet-cb-v4:checked').length;
+  const allV4 = cbsV4.length > 0 && checkedV4 === cbsV4.length;
+  let subnetsV4 = [];
+  if (!allV4) {
+    document.querySelectorAll('.alert-subnet-cb-v4:checked').forEach(cb => subnetsV4.push(cb.value));
   }
-  // Collect events
-  const evCbs = document.querySelectorAll('.alert-event-cb');
-  const evCheckedCount = document.querySelectorAll('.alert-event-cb:checked').length;
-  const evAllChecked = evCbs.length > 0 && evCheckedCount === evCbs.length;
-  let events = [];
-  if (!evAllChecked) {
-    document.querySelectorAll('.alert-event-cb:checked').forEach(cb => events.push(cb.value));
+  // Collect IPv6 subnets
+  const cbsV6 = document.querySelectorAll('.alert-subnet-cb-v6');
+  const checkedV6 = document.querySelectorAll('.alert-subnet-cb-v6:checked').length;
+  const allV6 = cbsV6.length > 0 && checkedV6 === cbsV6.length;
+  let subnetsV6 = [];
+  if (!allV6) {
+    document.querySelectorAll('.alert-subnet-cb-v6:checked').forEach(cb => subnetsV6.push(cb.value));
+  }
+  // Collect IPv4 events
+  const evCbsV4 = document.querySelectorAll('.alert-event-cb-v4');
+  const evCheckedV4 = document.querySelectorAll('.alert-event-cb-v4:checked').length;
+  const evAllV4 = evCbsV4.length > 0 && evCheckedV4 === evCbsV4.length;
+  let eventsV4 = [];
+  if (!evAllV4) {
+    document.querySelectorAll('.alert-event-cb-v4:checked').forEach(cb => eventsV4.push(cb.value));
+  }
+  // Collect IPv6 events
+  const evCbsV6 = document.querySelectorAll('.alert-event-cb-v6');
+  const evCheckedV6x = document.querySelectorAll('.alert-event-cb-v6:checked').length;
+  const evAllV6 = evCbsV6.length > 0 && evCheckedV6x === evCbsV6.length;
+  let eventsV6 = [];
+  if (!evAllV6) {
+    document.querySelectorAll('.alert-event-cb-v6:checked').forEach(cb => eventsV6.push(cb.value));
+  }
+  // If a tab is hidden due to scan mode, preserve original values when editing
+  if (scannerIPMode === 'ipv4' && editingOriginalCfg) {
+    subnetsV6 = editingOriginalCfg.subnetsV6 || [];
+    eventsV6 = editingOriginalCfg.eventsV6 || [];
+  }
+  if (scannerIPMode === 'ipv6' && editingOriginalCfg) {
+    subnetsV4 = editingOriginalCfg.subnetsV4 || [];
+    eventsV4 = editingOriginalCfg.eventsV4 || [];
   }
   const cfg = {
-    subnets: subnets,
-    events: events,
+    subnetsV4: subnetsV4,
+    subnetsV6: subnetsV6,
+    eventsV4: eventsV4,
+    eventsV6: eventsV6,
     type: 'email',
     smtpFrom: smtpFrom,
     smtpTo: smtpTo,
@@ -1733,6 +1981,7 @@ function editAlert(id) {
     const cfg = (configs || []).find(c => c.id === id);
     if (!cfg) return;
     editingAlertId = id;
+    editingOriginalCfg = cfg;
     document.getElementById('alertSmtpFrom').value = cfg.smtpFrom || '';
     document.getElementById('alertSmtpTo').value = cfg.smtpTo || '';
     document.getElementById('alertSmtpHost').value = cfg.smtpHost || '';
@@ -1742,8 +1991,8 @@ function editAlert(id) {
     document.getElementById('alertFieldsAuth').style.display = cfg.smtpAuth ? '' : 'none';
     document.getElementById('alertSmtpUser').value = cfg.smtpUser || '';
     document.getElementById('alertSmtpPass').value = cfg.smtpPass || '';
-    populateAlertSubnets(cfg.subnets);
-    populateAlertEvents(cfg.events);
+    populateAlertSubnets(cfg.subnetsV4, cfg.subnetsV6);
+    populateAlertEvents(cfg.eventsV4, cfg.eventsV6);
     setEditMode(true);
     document.getElementById('alertMsg').innerHTML = '';
     // Scroll to top of modal
@@ -1793,8 +2042,12 @@ function renderAlertList(configs) {
   }
   let html = '';
   for (const c of configs) {
-    const subnetsLabel = c.subnets && c.subnets.length > 0 ? c.subnets.join(', ') : t('alert_subnets_all');
-    const eventsLabel = c.events && c.events.length > 0 ? c.events.map(e => t(alertEventI18n[e] || e)).join(', ') : t('alert_events_all');
+    const v4Sub = c.subnetsV4 && c.subnetsV4.length > 0 ? c.subnetsV4.join(', ') : t('alert_subnets_all');
+    const v6Sub = c.subnetsV6 && c.subnetsV6.length > 0 ? c.subnetsV6.join(', ') : t('alert_subnets_all');
+    const subnetsLabel = 'IPv4: ' + v4Sub + ' | IPv6: ' + v6Sub;
+    const v4Ev = c.eventsV4 && c.eventsV4.length > 0 ? c.eventsV4.map(e => t(alertEventI18n[e] || e)).join(', ') : t('alert_events_all');
+    const v6Ev = c.eventsV6 && c.eventsV6.length > 0 ? c.eventsV6.map(e => t(alertEventI18n[e] || e)).join(', ') : t('alert_events_all');
+    const eventsLabel = 'IPv4: ' + v4Ev + ' | IPv6: ' + v6Ev;
     const fromTo = (c.smtpFrom || '?') + ' &rarr; ' + (c.smtpTo || '?');
     const flags = [c.smtpHost + ':' + (c.smtpPort||465), c.smtpSSL ? 'SSL' : 'STARTTLS', c.smtpAuth ? 'AUTH' : ''].filter(Boolean).join(' | ');
     html += '<div class="alert-list-item"><div class="alert-info"><strong>EMAIL</strong> &mdash; ' + fromTo + '<br><span style="font-size:12px;color:var(--text-secondary)">' + esc(flags) + ' / ' + esc(subnetsLabel) + '<br>' + esc(eventsLabel) + '</span></div>'

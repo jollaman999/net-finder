@@ -2,6 +2,7 @@ package netutil
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -9,6 +10,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"net-finder/internal/models"
 )
 
 func GetInterface(name string) (*net.Interface, error) {
@@ -184,14 +187,185 @@ func GetDefaultGateway() string {
 	return ""
 }
 
+// GetInterfaceForMode returns an interface suitable for the given IP mode.
+// For IPv6 or Both, the interface must have an IPv6 address.
+// For IPv4 or Both, the interface must have an IPv4 address.
+func GetInterfaceForMode(name string, mode models.IPMode) (*net.Interface, error) {
+	if name != "" {
+		iface, err := net.InterfaceByName(name)
+		if err != nil {
+			return nil, err
+		}
+		return iface, nil
+	}
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 || len(iface.HardwareAddr) == 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		hasIPv4, hasIPv6 := false, false
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok {
+				if ipnet.IP.To4() != nil {
+					hasIPv4 = true
+				} else if ipnet.IP.To16() != nil {
+					hasIPv6 = true
+				}
+			}
+		}
+		switch mode {
+		case models.IPModeIPv4:
+			if hasIPv4 {
+				return &iface, nil
+			}
+		case models.IPModeIPv6:
+			if hasIPv6 {
+				return &iface, nil
+			}
+		default: // Both
+			if hasIPv4 {
+				return &iface, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("적합한 네트워크 인터페이스를 찾을 수 없습니다 (모드: %s)", mode)
+}
+
+// GetInterfaceAddrV6 returns the global IPv6, link-local IPv6 and MAC for an interface
+func GetInterfaceAddrV6(iface *net.Interface) (globalIP, linkLocalIP net.IP, mac net.HardwareAddr, err error) {
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	mac = iface.HardwareAddr
+
+	for _, addr := range addrs {
+		ipnet, ok := addr.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ip := ipnet.IP
+		if ip.To4() != nil {
+			continue // skip IPv4
+		}
+		if ip.IsLinkLocalUnicast() {
+			if linkLocalIP == nil {
+				linkLocalIP = ip
+			}
+		} else if ip.IsGlobalUnicast() {
+			if globalIP == nil {
+				globalIP = ip
+			}
+		}
+	}
+
+	if globalIP == nil && linkLocalIP == nil {
+		return nil, nil, nil, fmt.Errorf("IPv6 주소를 찾을 수 없습니다")
+	}
+
+	return globalIP, linkLocalIP, mac, nil
+}
+
+// ParseSubnetsV6 parses IPv6 CIDR subnets from a string or from interface addresses
+func ParseSubnetsV6(subnetStr string, iface *net.Interface) []*net.IPNet {
+	var subnets []*net.IPNet
+
+	if subnetStr != "" {
+		parts := strings.Split(subnetStr, ",")
+		for _, part := range parts {
+			_, ipnet, err := net.ParseCIDR(strings.TrimSpace(part))
+			if err != nil {
+				continue
+			}
+			if ipnet.IP.To4() == nil { // only IPv6
+				subnets = append(subnets, ipnet)
+			}
+		}
+		return subnets
+	}
+
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return subnets
+	}
+
+	for _, addr := range addrs {
+		ipnet, ok := addr.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		if ipnet.IP.To4() != nil {
+			continue // skip IPv4
+		}
+		subnets = append(subnets, &net.IPNet{
+			IP:   ipnet.IP.Mask(ipnet.Mask),
+			Mask: ipnet.Mask,
+		})
+	}
+
+	return subnets
+}
+
+// GetDefaultGatewayV6 reads the default IPv6 gateway from /proc/net/ipv6_route
+func GetDefaultGatewayV6() string {
+	f, err := os.Open("/proc/net/ipv6_route")
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 10 {
+			continue
+		}
+		// fields[0]=dest, fields[1]=dest_prefix_len, fields[4]=next_hop
+		dest := fields[0]
+		prefixLen := fields[1]
+		nextHop := fields[4]
+
+		// Default route: destination is all zeros, prefix len is 00
+		if dest == "00000000000000000000000000000000" && prefixLen == "00" && nextHop != "00000000000000000000000000000000" {
+			ip := parseHexIPv6(nextHop)
+			if ip != nil {
+				return ip.String()
+			}
+		}
+	}
+	return ""
+}
+
+func parseHexIPv6(s string) net.IP {
+	if len(s) != 32 {
+		return nil
+	}
+	b, err := hex.DecodeString(s)
+	if err != nil || len(b) != 16 {
+		return nil
+	}
+	return net.IP(b)
+}
+
 func SortIPStrings(ips []string) {
 	sort.Slice(ips, func(i, j int) bool {
-		a := net.ParseIP(ips[i]).To4()
-		b := net.ParseIP(ips[j]).To4()
+		a := net.ParseIP(ips[i])
+		b := net.ParseIP(ips[j])
 		if a == nil || b == nil {
 			return ips[i] < ips[j]
 		}
-		return binary.BigEndian.Uint32(a) < binary.BigEndian.Uint32(b)
+		return bytes.Compare(a.To16(), b.To16()) < 0
 	})
 }
 
@@ -202,15 +376,9 @@ func SortCIDRStrings(cidrs []string) {
 		if errA != nil || errB != nil {
 			return cidrs[i] < cidrs[j]
 		}
-		ipA := netA.IP.To4()
-		ipB := netB.IP.To4()
-		if ipA == nil || ipB == nil {
-			return cidrs[i] < cidrs[j]
-		}
-		a := binary.BigEndian.Uint32(ipA)
-		b := binary.BigEndian.Uint32(ipB)
-		if a != b {
-			return a < b
+		cmp := bytes.Compare(netA.IP.To16(), netB.IP.To16())
+		if cmp != 0 {
+			return cmp < 0
 		}
 		onesA, _ := netA.Mask.Size()
 		onesB, _ := netB.Mask.Size()

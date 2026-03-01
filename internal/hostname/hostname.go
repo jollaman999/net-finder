@@ -97,7 +97,11 @@ func resolveDNSPTR(resolver *net.Resolver, ip string) string {
 }
 
 // resolveNetBIOS sends a NetBIOS Node Status query (UDP 137)
+// NetBIOS is IPv4-only; skip for IPv6 addresses.
 func resolveNetBIOS(ip string) string {
+	if net.ParseIP(ip).To4() == nil {
+		return "" // NetBIOS is IPv4-only
+	}
 	conn, err := net.DialTimeout("udp4", ip+":137", 500*time.Millisecond)
 	if err != nil {
 		return ""
@@ -169,16 +173,22 @@ func resolveNetBIOS(ip string) string {
 
 // resolveMDNS performs an mDNS reverse PTR lookup (UDP 5353) with unicast response
 func resolveMDNS(ip string) string {
-	parsed := net.ParseIP(ip).To4()
+	parsed := net.ParseIP(ip)
 	if parsed == nil {
 		return ""
 	}
 
-	arpaName := fmt.Sprintf("%d.%d.%d.%d.in-addr.arpa", parsed[3], parsed[2], parsed[1], parsed[0])
+	var arpaName string
+	if parsed.To4() != nil {
+		p4 := parsed.To4()
+		arpaName = fmt.Sprintf("%d.%d.%d.%d.in-addr.arpa", p4[3], p4[2], p4[1], p4[0])
+	} else {
+		arpaName = buildIPv6ArpaName(parsed)
+	}
 	query := buildDNSQuery(0x0000, arpaName, 12, true) // PTR=12, unicast=true
 
 	// Send unicast query directly to the target host on port 5353
-	conn, err := net.DialTimeout("udp4", ip+":5353", 500*time.Millisecond)
+	conn, err := net.DialTimeout("udp", net.JoinHostPort(ip, "5353"), 500*time.Millisecond)
 	if err != nil {
 		return ""
 	}
@@ -206,7 +216,7 @@ func resolveMDNS(ip string) string {
 
 // resolveSNMP queries SNMP sysName (OID 1.3.6.1.2.1.1.5.0) with community "public"
 func resolveSNMP(ip string) string {
-	conn, err := net.DialTimeout("udp4", ip+":161", 500*time.Millisecond)
+	conn, err := net.DialTimeout("udp", net.JoinHostPort(ip, "161"), 500*time.Millisecond)
 	if err != nil {
 		return ""
 	}
@@ -533,7 +543,7 @@ func asn1Skip(data []byte, pos int) int {
 
 // resolveTLS connects to port 443 and extracts hostname from TLS certificate CN/SAN
 func resolveTLS(ip string) string {
-	conn, err := net.DialTimeout("tcp4", ip+":443", 500*time.Millisecond)
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, "443"), 500*time.Millisecond)
 	if err != nil {
 		return ""
 	}
@@ -574,7 +584,7 @@ func resolveTLS(ip string) string {
 
 // resolveSMTP connects to port 25 and extracts hostname from SMTP banner
 func resolveSMTP(ip string) string {
-	conn, err := net.DialTimeout("tcp4", ip+":25", 500*time.Millisecond)
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, "25"), 500*time.Millisecond)
 	if err != nil {
 		return ""
 	}
@@ -612,4 +622,19 @@ func resolveSMTP(ip string) string {
 	}
 
 	return hostname
+}
+
+// buildIPv6ArpaName converts an IPv6 address to its ip6.arpa reverse DNS name.
+func buildIPv6ArpaName(ip net.IP) string {
+	ip = ip.To16()
+	if ip == nil {
+		return ""
+	}
+	// Expand to 32 hex nibbles and reverse
+	hex := fmt.Sprintf("%032x", []byte(ip))
+	var parts []string
+	for i := len(hex) - 1; i >= 0; i-- {
+		parts = append(parts, string(hex[i]))
+	}
+	return strings.Join(parts, ".") + ".ip6.arpa"
 }

@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"fmt"
+	"net"
 	"time"
 
 	"net-finder/internal/models"
@@ -9,17 +10,31 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"golang.org/x/net/bpf"
 )
 
 // ListenVRRP listens for VRRP packets on the given interface
-func ListenVRRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}) ([]models.VRRPEntry, error) {
+func ListenVRRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}, mode ...models.IPMode) ([]models.VRRPEntry, error) {
 	sock, err := netutil.NewRawSocket(ifaceName)
 	if err != nil {
 		return nil, fmt.Errorf("VRRP 소켓 열기 실패: %v", err)
 	}
 	defer sock.Close()
 
-	if err := sock.SetBPFFilter(netutil.BPFFilterVRRP()); err != nil {
+	ipMode := models.IPModeBoth
+	if len(mode) > 0 {
+		ipMode = mode[0]
+	}
+	var bpfFilter []bpf.RawInstruction
+	switch ipMode {
+	case models.IPModeIPv4:
+		bpfFilter = netutil.BPFFilterVRRP()
+	case models.IPModeIPv6:
+		bpfFilter = netutil.BPFFilterVRRPv6()
+	default:
+		bpfFilter = netutil.BPFFilterVRRPDual()
+	}
+	if err := sock.SetBPFFilter(bpfFilter); err != nil {
 		return nil, fmt.Errorf("VRRP BPF 필터 설정 실패: %v", err)
 	}
 
@@ -87,13 +102,24 @@ func parseVRRPPacket(packet gopacket.Packet) (models.VRRPEntry, bool) {
 			entry.IPAddresses = append(entry.IPAddresses, ip.String())
 		}
 	} else {
-		// Manual parse from IPv4 payload
+		// Manual parse: try IPv4 first, then IPv6
 		ipLayer := packet.Layer(layers.LayerTypeIPv4)
-		if ipLayer == nil {
+		ip6Layer := packet.Layer(layers.LayerTypeIPv6)
+
+		var payload []byte
+		var isIPv6 bool
+
+		if ipLayer != nil {
+			ip := ipLayer.(*layers.IPv4)
+			payload = ip.Payload
+		} else if ip6Layer != nil {
+			ip6 := ip6Layer.(*layers.IPv6)
+			payload = ip6.Payload
+			isIPv6 = true
+		} else {
 			return entry, false
 		}
-		ip := ipLayer.(*layers.IPv4)
-		payload := ip.Payload
+
 		if len(payload) < 8 {
 			return entry, false
 		}
@@ -110,8 +136,12 @@ func parseVRRPPacket(packet gopacket.Packet) (models.VRRPEntry, bool) {
 		entry.Priority = int(payload[2])
 		countIPs := int(payload[3])
 
-		// Sanity check: IP count must fit within the payload
-		if countIPs == 0 || 8+countIPs*4 > len(payload) {
+		ipSize := 4
+		if isIPv6 {
+			ipSize = 16
+		}
+
+		if countIPs == 0 || 8+countIPs*ipSize > len(payload) {
 			return entry, false
 		}
 
@@ -119,17 +149,23 @@ func parseVRRPPacket(packet gopacket.Packet) (models.VRRPEntry, bool) {
 
 		offset := 8
 		for i := 0; i < countIPs; i++ {
-			ipAddr := fmt.Sprintf("%d.%d.%d.%d", payload[offset], payload[offset+1], payload[offset+2], payload[offset+3])
+			ipAddr := net.IP(payload[offset : offset+ipSize]).String()
 			entry.IPAddresses = append(entry.IPAddresses, ipAddr)
-			offset += 4
+			offset += ipSize
 		}
 	}
 
-	// Get source IP/MAC
+	// Get source IP/MAC (try IPv4 first, then IPv6)
 	ipLayer := packet.Layer(layers.LayerTypeIPv4)
 	if ipLayer != nil {
 		ip := ipLayer.(*layers.IPv4)
 		entry.SourceIP = ip.SrcIP.String()
+	} else {
+		ip6Layer := packet.Layer(layers.LayerTypeIPv6)
+		if ip6Layer != nil {
+			ip6 := ip6Layer.(*layers.IPv6)
+			entry.SourceIP = ip6.SrcIP.String()
+		}
 	}
 
 	ethLayer := packet.Layer(layers.LayerTypeEthernet)

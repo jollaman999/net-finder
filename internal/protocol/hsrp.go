@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"golang.org/x/net/bpf"
 )
 
 // HSRP state names
@@ -23,14 +24,27 @@ var hsrpStateNames = map[byte]string{
 }
 
 // ListenHSRP listens for HSRP packets on the given interface
-func ListenHSRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}) ([]models.HSRPEntry, error) {
+func ListenHSRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}, mode ...models.IPMode) ([]models.HSRPEntry, error) {
 	sock, err := netutil.NewRawSocket(ifaceName)
 	if err != nil {
 		return nil, fmt.Errorf("HSRP 소켓 열기 실패: %v", err)
 	}
 	defer sock.Close()
 
-	if err := sock.SetBPFFilter(netutil.BPFFilterHSRP()); err != nil {
+	ipMode := models.IPModeBoth
+	if len(mode) > 0 {
+		ipMode = mode[0]
+	}
+	var bpfFilter []bpf.RawInstruction
+	switch ipMode {
+	case models.IPModeIPv4:
+		bpfFilter = netutil.BPFFilterHSRP()
+	case models.IPModeIPv6:
+		bpfFilter = netutil.BPFFilterHSRPv6()
+	default:
+		bpfFilter = netutil.BPFFilterHSRPDual()
+	}
+	if err := sock.SetBPFFilter(bpfFilter); err != nil {
 		return nil, fmt.Errorf("HSRP BPF 필터 설정 실패: %v", err)
 	}
 
@@ -82,13 +96,19 @@ func ListenHSRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}
 func parseHSRPPacket(packet gopacket.Packet) (models.HSRPEntry, bool) {
 	var entry models.HSRPEntry
 
-	// Get source IP
+	// Get source IP (try IPv4 first, then IPv6)
 	ipLayer := packet.Layer(layers.LayerTypeIPv4)
-	if ipLayer == nil {
-		return entry, false
+	if ipLayer != nil {
+		ip := ipLayer.(*layers.IPv4)
+		entry.SourceIP = ip.SrcIP.String()
+	} else {
+		ip6Layer := packet.Layer(layers.LayerTypeIPv6)
+		if ip6Layer == nil {
+			return entry, false
+		}
+		ip6 := ip6Layer.(*layers.IPv6)
+		entry.SourceIP = ip6.SrcIP.String()
 	}
-	ip := ipLayer.(*layers.IPv4)
-	entry.SourceIP = ip.SrcIP.String()
 
 	// Get source MAC
 	ethLayer := packet.Layer(layers.LayerTypeEthernet)
@@ -189,7 +209,10 @@ func parseHSRPv2(data []byte, entry models.HSRPEntry) (models.HSRPEntry, bool) {
 			entry.HelloTime = int(tlvData[5])<<8 | int(tlvData[6])
 			entry.HoldTime = int(tlvData[7])<<8 | int(tlvData[8])
 
-			if len(tlvData) >= 14 {
+			if len(tlvData) >= 26 {
+				// Try 16-byte IPv6 virtual IP at offset 10
+				entry.VirtualIP = net.IP(tlvData[10:26]).String()
+			} else if len(tlvData) >= 14 {
 				entry.VirtualIP = net.IP(tlvData[10:14]).String()
 			}
 		}

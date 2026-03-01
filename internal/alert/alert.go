@@ -116,7 +116,46 @@ func (am *AlertManager) load() {
 		log.Printf("알림 설정 파싱 실패: %v", err)
 		return
 	}
+	// Migrate old Subnets/Events fields to V4/V6
+	migrated := false
+	eventsV4Set := map[string]bool{
+		"hosts": true, "conflicts": true, "dhcp": true,
+		"hsrp_vrrp": true, "lldp_cdp": true, "arp_spoofing": true, "dns_spoofing": true,
+	}
+	eventsV6Set := map[string]bool{
+		"hosts": true, "conflicts": true, "dhcpv6": true, "ndp_spoofing": true,
+	}
+	for i := range configs {
+		if len(configs[i].Subnets) > 0 {
+			for _, s := range configs[i].Subnets {
+				ip := strings.Split(s, "/")[0]
+				if strings.Contains(ip, ":") {
+					configs[i].SubnetsV6 = append(configs[i].SubnetsV6, s)
+				} else {
+					configs[i].SubnetsV4 = append(configs[i].SubnetsV4, s)
+				}
+			}
+			configs[i].Subnets = nil
+			migrated = true
+		}
+		if len(configs[i].Events) > 0 {
+			for _, e := range configs[i].Events {
+				if eventsV4Set[e] {
+					configs[i].EventsV4 = append(configs[i].EventsV4, e)
+				}
+				if eventsV6Set[e] {
+					configs[i].EventsV6 = append(configs[i].EventsV6, e)
+				}
+			}
+			configs[i].Events = nil
+			migrated = true
+		}
+	}
 	am.configs = configs
+	if migrated {
+		am.save()
+		log.Printf("알림 설정 마이그레이션 완료")
+	}
 	log.Printf("알림 설정 %d건 로드: %s", len(configs), am.filePath)
 }
 
@@ -213,12 +252,9 @@ func (am *AlertManager) SendConflictAlerts(conflicts []models.ConflictEntry) {
 	}
 
 	for _, cfg := range configs {
-		if !hasEvent(cfg, "conflicts") {
-			continue
-		}
 		for _, subnet := range subnetOrder {
 			entries := bySubnet[subnet]
-			if !matchesSubnetStr(cfg, subnet) {
+			if !matchesSubnetStr(cfg, subnet) || !hasEventForSubnet(cfg, "conflicts", subnet) {
 				continue
 			}
 			subject := fmt.Sprintf("[Net Finder] IP Conflict — %s (%d)", subnet, len(entries))
@@ -235,7 +271,7 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 	sent := 0
 	var lastErr error
 
-	if hasEvent(cfg, "conflicts") {
+	if hasEventV4(cfg, "conflicts") {
 		testConflicts := []models.ConflictEntry{
 			{IP: "192.168.1.100", MACs: []string{"AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02"}, Vendors: []string{"Vendor A", "Vendor B"}, Subnet: "192.168.1.0/24"},
 			{IP: "192.168.1.200", MACs: []string{"11:22:33:44:55:01", "11:22:33:44:55:02", "11:22:33:44:55:03"}, Vendors: []string{"Vendor C", "Vendor D", "Vendor E"}, Subnet: "192.168.1.0/24"},
@@ -249,7 +285,7 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 		}
 	}
 
-	if hasEvent(cfg, "hosts") {
+	if hasEventV4(cfg, "hosts") {
 		testHosts := []models.HostEntry{
 			{IP: "192.168.1.1", Hostname: "gateway.local", MAC: "AA:BB:CC:DD:EE:01", Vendor: "Cisco Systems", Subnet: "192.168.1.0/24"},
 			{IP: "192.168.1.10", Hostname: "server.local", MAC: "11:22:33:44:55:66", Vendor: "Dell Inc.", Subnet: "192.168.1.0/24"},
@@ -264,7 +300,7 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 		}
 	}
 
-	if hasEvent(cfg, "dhcp") {
+	if hasEventV4(cfg, "dhcp") {
 		testDHCP := []models.DHCPServerJSON{
 			{ServerIP: "192.168.1.1", ServerMAC: "AA:BB:CC:DD:EE:01", Vendor: "Cisco Systems", OfferedIP: "192.168.1.100", SubnetMask: "255.255.255.0", Router: "192.168.1.1", DNS: []string{"8.8.8.8", "8.8.4.4"}, LeaseTime: 86400},
 		}
@@ -277,7 +313,7 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 		}
 	}
 
-	if hasEvent(cfg, "hsrp_vrrp") {
+	if hasEventV4(cfg, "hsrp_vrrp") {
 		testHSRP := []models.HSRPEntry{
 			{Version: 2, Group: 1, Priority: 110, State: "Active", VirtualIP: "192.168.1.254", HelloTime: 3, HoldTime: 10, SourceIP: "192.168.1.2", SourceMAC: "00:00:0C:9F:F0:01", Timestamp: time.Now().Format("15:04:05")},
 		}
@@ -293,7 +329,7 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 		}
 	}
 
-	if hasEvent(cfg, "lldp_cdp") {
+	if hasEventV4(cfg, "lldp_cdp") {
 		testLLDP := []models.LLDPNeighbor{
 			{ChassisID: "AA:BB:CC:DD:EE:01", PortID: "Gi0/1", SysName: "switch01.local", SysDesc: "Cisco IOS", MgmtAddr: "192.168.1.2", TTL: 120, SourceMAC: "AA:BB:CC:DD:EE:01", Timestamp: time.Now().Format("15:04:05")},
 		}
@@ -309,21 +345,47 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 		}
 	}
 
-	if hasEvent(cfg, "arp_spoofing") || hasEvent(cfg, "dns_spoofing") {
+	if hasEventV4(cfg, "arp_spoofing") || hasEventV4(cfg, "dns_spoofing") {
 		var arpAlerts []models.ARPSpoofAlert
 		var dnsAlerts []models.DNSSpoofAlert
-		if hasEvent(cfg, "arp_spoofing") {
+		if hasEventV4(cfg, "arp_spoofing") {
 			arpAlerts = []models.ARPSpoofAlert{
 				{IP: "192.168.1.1", OldMAC: "AA:BB:CC:DD:EE:01", NewMAC: "FF:FF:FF:00:11:22", AlertType: "gateway_mac_change", Severity: "critical", Message: "Gateway 192.168.1.1 MAC changed", Count: 5, FirstSeen: time.Now().Add(-2 * time.Minute).Format("15:04:05"), Timestamp: time.Now().Format("15:04:05"), Subnet: "192.168.1.0/24"},
 			}
 		}
-		if hasEvent(cfg, "dns_spoofing") {
+		if hasEventV4(cfg, "dns_spoofing") {
 			dnsAlerts = []models.DNSSpoofAlert{
 				{Domain: "example.com", Server1: "8.8.8.8", Response1: "93.184.216.34", Server2: "192.168.1.1", Response2: "10.0.0.99", AlertType: "dns_mismatch", Severity: "critical", Message: "DNS response mismatch for example.com", Timestamp: time.Now().Format("15:04:05")},
 			}
 		}
 		subject := buildSecuritySubject(arpAlerts, dnsAlerts)
 		body := buildSecurityHTMLReport(arpAlerts, dnsAlerts)
+		if err := sendEmailHTML(cfg, subject, body); err != nil {
+			lastErr = err
+		} else {
+			sent++
+		}
+	}
+
+	if hasEventV6(cfg, "ndp_spoofing") {
+		testNDP := []models.NDPSpoofAlert{
+			{IP: "fe80::1", OldMAC: "AA:BB:CC:DD:EE:01", NewMAC: "FF:FF:FF:00:11:22", AlertType: "spoof", Severity: "critical", Count: 3, FirstSeen: time.Now().Add(-1 * time.Minute).Format("15:04:05"), Timestamp: time.Now().Format("15:04:05")},
+		}
+		subject := fmt.Sprintf("[Net Finder] NDP Spoofing Alert (%d)", len(testNDP))
+		body := buildNDPSecurityHTMLReport(testNDP)
+		if err := sendEmailHTML(cfg, subject, body); err != nil {
+			lastErr = err
+		} else {
+			sent++
+		}
+	}
+
+	if hasEventV6(cfg, "dhcpv6") {
+		testDHCPv6 := []models.DHCPv6ServerJSON{
+			{ServerIP: "fe80::1", ServerMAC: "AA:BB:CC:DD:EE:01", Vendor: "Cisco Systems", Preference: 0, DNSServers: []string{"2001:4860:4860::8888"}, DomainSearch: []string{"example.com"}, ValidLifetime: 86400},
+		}
+		subject := fmt.Sprintf("[Net Finder] DHCPv6 Servers Detected (%d)", len(testDHCPv6))
+		body := buildDHCPv6HTMLReport(testDHCPv6)
 		if err := sendEmailHTML(cfg, subject, body); err != nil {
 			lastErr = err
 		} else {
@@ -344,27 +406,59 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 }
 
 func matchesSubnetStr(cfg models.AlertConfig, subnet string) bool {
-	if len(cfg.Subnets) == 0 {
+	ip := strings.Split(subnet, "/")[0]
+	if strings.Contains(ip, ":") {
+		if len(cfg.SubnetsV6) == 0 {
+			return true
+		}
+		for _, s := range cfg.SubnetsV6 {
+			if s == subnet {
+				return true
+			}
+		}
+	} else {
+		if len(cfg.SubnetsV4) == 0 {
+			return true
+		}
+		for _, s := range cfg.SubnetsV4 {
+			if s == subnet {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasEventV4(cfg models.AlertConfig, event string) bool {
+	if len(cfg.EventsV4) == 0 {
 		return true
 	}
-	for _, s := range cfg.Subnets {
-		if s == subnet {
+	for _, e := range cfg.EventsV4 {
+		if e == event {
 			return true
 		}
 	}
 	return false
 }
 
-func hasEvent(cfg models.AlertConfig, event string) bool {
-	if len(cfg.Events) == 0 {
+func hasEventV6(cfg models.AlertConfig, event string) bool {
+	if len(cfg.EventsV6) == 0 {
 		return true
 	}
-	for _, e := range cfg.Events {
+	for _, e := range cfg.EventsV6 {
 		if e == event {
 			return true
 		}
 	}
 	return false
+}
+
+func hasEventForSubnet(cfg models.AlertConfig, event, subnet string) bool {
+	ip := strings.Split(subnet, "/")[0]
+	if strings.Contains(ip, ":") {
+		return hasEventV6(cfg, event)
+	}
+	return hasEventV4(cfg, event)
 }
 
 func buildHTMLReport(subnet string, conflicts []models.ConflictEntry) string {
@@ -527,7 +621,7 @@ func (am *AlertManager) SendSecurityAlerts(arpAlerts []models.ARPSpoofAlert, dns
 	for _, cfg := range configs {
 		// Filter ARP alerts by subnet and event
 		var filteredARP []models.ARPSpoofAlert
-		if hasEvent(cfg, "arp_spoofing") {
+		if hasEventV4(cfg, "arp_spoofing") {
 			for _, a := range arpAlerts {
 				subnet := a.Subnet
 				if subnet == "" {
@@ -541,7 +635,7 @@ func (am *AlertManager) SendSecurityAlerts(arpAlerts []models.ARPSpoofAlert, dns
 
 		// Filter DNS alerts by event
 		var filteredDNS []models.DNSSpoofAlert
-		if hasEvent(cfg, "dns_spoofing") {
+		if hasEventV4(cfg, "dns_spoofing") {
 			filteredDNS = dnsAlerts
 		}
 
@@ -585,12 +679,9 @@ func (am *AlertManager) SendHostAlerts(hosts []models.HostEntry) {
 	}
 
 	for _, cfg := range configs {
-		if !hasEvent(cfg, "hosts") {
-			continue
-		}
 		for _, subnet := range subnetOrder {
 			entries := bySubnet[subnet]
-			if !matchesSubnetStr(cfg, subnet) {
+			if !matchesSubnetStr(cfg, subnet) || !hasEventForSubnet(cfg, "hosts", subnet) {
 				continue
 			}
 			subject := fmt.Sprintf("[Net Finder] Host Discovery — %s (%d hosts)", subnet, len(entries))
@@ -617,7 +708,7 @@ func (am *AlertManager) SendDHCPAlerts(servers []models.DHCPServerJSON) {
 	}
 
 	for _, cfg := range configs {
-		if !hasEvent(cfg, "dhcp") {
+		if !hasEventV4(cfg, "dhcp") {
 			continue
 		}
 		subject := fmt.Sprintf("[Net Finder] DHCP Servers Detected (%d)", len(servers))
@@ -643,7 +734,7 @@ func (am *AlertManager) SendProtocolAlerts(hsrp []models.HSRPEntry, vrrp []model
 	}
 
 	for _, cfg := range configs {
-		if !hasEvent(cfg, "hsrp_vrrp") {
+		if !hasEventV4(cfg, "hsrp_vrrp") {
 			continue
 		}
 		var parts []string
@@ -676,7 +767,7 @@ func (am *AlertManager) SendDiscoveryAlerts(lldp []models.LLDPNeighbor, cdp []mo
 	}
 
 	for _, cfg := range configs {
-		if !hasEvent(cfg, "lldp_cdp") {
+		if !hasEventV4(cfg, "lldp_cdp") {
 			continue
 		}
 		var parts []string
@@ -692,6 +783,143 @@ func (am *AlertManager) SendDiscoveryAlerts(lldp []models.LLDPNeighbor, cdp []mo
 			log.Printf("디스커버리 알림 발송 실패 [%s]: %v", cfg.ID, err)
 		}
 	}
+}
+
+// SendNDPAlerts sends NDP spoofing alert emails
+func (am *AlertManager) SendNDPAlerts(alerts []models.NDPSpoofAlert) {
+	if len(alerts) == 0 {
+		return
+	}
+	am.mu.RLock()
+	configs := make([]models.AlertConfig, len(am.configs))
+	copy(configs, am.configs)
+	am.mu.RUnlock()
+
+	if len(configs) == 0 {
+		return
+	}
+
+	for _, cfg := range configs {
+		if !hasEventV6(cfg, "ndp_spoofing") {
+			continue
+		}
+		subject := fmt.Sprintf("[Net Finder] NDP Spoofing Alert (%d)", len(alerts))
+		body := buildNDPSecurityHTMLReport(alerts)
+		if err := sendEmailHTML(cfg, subject, body); err != nil {
+			log.Printf("NDP 보안 알림 발송 실패 [%s]: %v", cfg.ID, err)
+		}
+	}
+}
+
+// SendDHCPv6Alerts sends DHCPv6 server detection alerts
+func (am *AlertManager) SendDHCPv6Alerts(servers []models.DHCPv6ServerJSON) {
+	if len(servers) == 0 {
+		return
+	}
+	am.mu.RLock()
+	configs := make([]models.AlertConfig, len(am.configs))
+	copy(configs, am.configs)
+	am.mu.RUnlock()
+
+	if len(configs) == 0 {
+		return
+	}
+
+	for _, cfg := range configs {
+		if !hasEventV6(cfg, "dhcpv6") {
+			continue
+		}
+		subject := fmt.Sprintf("[Net Finder] DHCPv6 Servers Detected (%d)", len(servers))
+		body := buildDHCPv6HTMLReport(servers)
+		if err := sendEmailHTML(cfg, subject, body); err != nil {
+			log.Printf("DHCPv6 알림 발송 실패 [%s]: %v", cfg.ID, err)
+		}
+	}
+}
+
+func buildNDPSecurityHTMLReport(alerts []models.NDPSpoofAlert) string {
+	now := time.Now().Format("2006-01-02 15:04:05")
+
+	var b strings.Builder
+	b.WriteString(`<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f5f5">`)
+	b.WriteString(`<div style="max-width:800px;margin:20px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1)">`)
+
+	b.WriteString(`<div style="background:#e65100;color:#fff;padding:20px 24px">`)
+	b.WriteString(`<h2 style="margin:0 0 4px;font-size:18px">NDP Spoofing Alert</h2>`)
+	b.WriteString(fmt.Sprintf(`<div style="font-size:13px;opacity:0.9">%d alert(s) &nbsp;|&nbsp; %s</div>`, len(alerts), htmlEsc(now)))
+	b.WriteString(`</div>`)
+
+	b.WriteString(`<div style="padding:16px 24px">`)
+	b.WriteString(`<table style="width:100%;border-collapse:collapse;font-size:14px">`)
+	b.WriteString(`<thead><tr style="background:#f5f5f5">`)
+	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e65100;font-weight:600;white-space:nowrap">Severity</th>`)
+	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e65100;font-weight:600;white-space:nowrap">Target IP</th>`)
+	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e65100;font-weight:600;white-space:nowrap">Known MAC</th>`)
+	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e65100;font-weight:600;white-space:nowrap">Attacker MAC</th>`)
+	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e65100;font-weight:600;white-space:nowrap">Packets</th>`)
+	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e65100;font-weight:600;white-space:nowrap">Time</th>`)
+	b.WriteString(`</tr></thead><tbody>`)
+
+	for _, a := range alerts {
+		sevColor := "#f57f17"
+		if a.Severity == "critical" {
+			sevColor = "#d32f2f"
+		}
+		b.WriteString(`<tr style="border-bottom:1px solid #eee">`)
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-weight:600;color:%s;white-space:nowrap">%s</td>`, sevColor, htmlEsc(strings.ToUpper(a.Severity))))
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-weight:600;white-space:nowrap">%s</td>`, htmlEsc(a.IP)))
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-family:'Courier New',monospace;font-size:13px;white-space:nowrap">%s</td>`, htmlEsc(a.OldMAC)))
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-family:'Courier New',monospace;font-size:13px;white-space:nowrap">%s</td>`, htmlEsc(a.NewMAC)))
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;text-align:center;font-weight:600">%d</td>`, a.Count))
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;white-space:nowrap">%s</td>`, htmlEsc(a.Timestamp)))
+		b.WriteString(`</tr>`)
+	}
+	b.WriteString(`</tbody></table></div>`)
+
+	b.WriteString(`<div style="padding:12px 24px;background:#f5f5f5;font-size:12px;color:#999;text-align:center">`)
+	b.WriteString(`Sent by <strong>Net Finder</strong></div>`)
+	b.WriteString(`</div></body></html>`)
+	return b.String()
+}
+
+func buildDHCPv6HTMLReport(servers []models.DHCPv6ServerJSON) string {
+	now := time.Now().Format("2006-01-02 15:04:05")
+
+	var b strings.Builder
+	b.WriteString(`<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f5f5">`)
+	b.WriteString(`<div style="max-width:800px;margin:20px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1)">`)
+
+	b.WriteString(`<div style="background:#388e3c;color:#fff;padding:20px 24px">`)
+	b.WriteString(`<h2 style="margin:0 0 4px;font-size:18px">DHCPv6 Servers Detected</h2>`)
+	b.WriteString(fmt.Sprintf(`<div style="font-size:13px;opacity:0.9">%d server(s) &nbsp;|&nbsp; %s</div>`, len(servers), htmlEsc(now)))
+	b.WriteString(`</div>`)
+
+	b.WriteString(`<div style="padding:16px 24px">`)
+	b.WriteString(`<table style="width:100%;border-collapse:collapse;font-size:14px">`)
+	b.WriteString(`<thead><tr style="background:#f5f5f5">`)
+	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #388e3c;font-weight:600;white-space:nowrap">Server IP</th>`)
+	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #388e3c;font-weight:600;white-space:nowrap">Server MAC</th>`)
+	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #388e3c;font-weight:600;white-space:nowrap">Vendor</th>`)
+	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #388e3c;font-weight:600;white-space:nowrap">Preference</th>`)
+	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #388e3c;font-weight:600;white-space:nowrap">DNS</th>`)
+	b.WriteString(`</tr></thead><tbody>`)
+
+	for _, s := range servers {
+		dns := strings.Join(s.DNSServers, ", ")
+		b.WriteString(`<tr style="border-bottom:1px solid #eee">`)
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-weight:600;white-space:nowrap">%s</td>`, htmlEsc(s.ServerIP)))
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-family:'Courier New',monospace;font-size:13px;white-space:nowrap">%s</td>`, htmlEsc(s.ServerMAC)))
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px">%s</td>`, htmlEsc(s.Vendor)))
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;text-align:center">%d</td>`, s.Preference))
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px">%s</td>`, htmlEsc(dns)))
+		b.WriteString(`</tr>`)
+	}
+
+	b.WriteString(`</tbody></table></div>`)
+	b.WriteString(`<div style="padding:12px 24px;background:#f5f5f5;font-size:12px;color:#999;text-align:center">`)
+	b.WriteString(`Sent by <strong>Net Finder</strong></div>`)
+	b.WriteString(`</div></body></html>`)
+	return b.String()
 }
 
 func buildSecuritySubject(arpAlerts []models.ARPSpoofAlert, dnsAlerts []models.DNSSpoofAlert) string {

@@ -2,8 +2,30 @@ package models
 
 import (
 	"net"
+	"strings"
 	"sync"
 )
+
+// IPMode represents the IP version scanning mode
+type IPMode string
+
+const (
+	IPModeIPv4 IPMode = "ipv4"
+	IPModeIPv6 IPMode = "ipv6"
+	IPModeBoth IPMode = "both"
+)
+
+// ParseIPMode parses a string into an IPMode, defaulting to Both
+func ParseIPMode(s string) IPMode {
+	switch strings.ToLower(s) {
+	case "ipv4", "4":
+		return IPModeIPv4
+	case "ipv6", "6":
+		return IPModeIPv6
+	default:
+		return IPModeBoth
+	}
+}
 
 // ProgressInfo represents scan progress
 type ProgressInfo struct {
@@ -19,6 +41,7 @@ type HostEntry struct {
 	MAC         string   `json:"mac"`
 	Vendor      string   `json:"vendor"`
 	Subnet      string   `json:"subnet"`
+	IPVersion   int      `json:"ipVersion"`
 	IsBond      bool     `json:"isBond,omitempty"`
 	BondMACs    []string `json:"bondMACs,omitempty"`
 	BondVendors []string `json:"bondVendors,omitempty"`
@@ -54,6 +77,40 @@ type DHCPServerInfo struct {
 	Router     net.IP
 	DNS        []net.IP
 	LeaseTime  uint32
+}
+
+// DHCPv6ServerJSON is the JSON-friendly DHCPv6 server info
+type DHCPv6ServerJSON struct {
+	ServerIP      string   `json:"serverIP"`
+	ServerMAC     string   `json:"serverMAC"`
+	Vendor        string   `json:"vendor"`
+	Preference    int      `json:"preference"`
+	DNSServers    []string `json:"dnsServers"`
+	DomainSearch  []string `json:"domainSearch"`
+	ValidLifetime uint32   `json:"validLifetime"`
+}
+
+// DHCPv6ServerInfo holds raw DHCPv6 server data
+type DHCPv6ServerInfo struct {
+	ServerIP      net.IP
+	ServerMAC     net.HardwareAddr
+	Preference    int
+	DNSServers    []net.IP
+	DomainSearch  []string
+	ValidLifetime uint32
+}
+
+// NDPSpoofAlert represents an NDP spoofing alert
+type NDPSpoofAlert struct {
+	IP        string `json:"ip"`
+	OldMAC    string `json:"oldMAC"`
+	NewMAC    string `json:"newMAC"`
+	AlertType string `json:"alertType"`
+	Severity  string `json:"severity"`
+	Message   string `json:"message"`
+	Count     int    `json:"count"`
+	FirstSeen string `json:"firstSeen"`
+	Timestamp string `json:"timestamp"`
 }
 
 // HSRPEntry represents an HSRP advertisement
@@ -141,19 +198,22 @@ type DNSSpoofAlert struct {
 
 // ScanState holds all scan results
 type ScanState struct {
-	Mu            sync.RWMutex     `json:"-"`
-	Status        string           `json:"status"`
-	Progress      ProgressInfo     `json:"progress"`
-	Hosts         []HostEntry      `json:"hosts"`
-	Conflicts     []ConflictEntry  `json:"conflicts"`
-	DHCPServers   []DHCPServerJSON `json:"dhcpServers"`
-	HSRPEntries   []HSRPEntry      `json:"hsrpEntries"`
-	VRRPEntries   []VRRPEntry      `json:"vrrpEntries"`
-	LLDPNeighbors []LLDPNeighbor   `json:"lldpNeighbors"`
-	CDPNeighbors  []CDPNeighbor    `json:"cdpNeighbors"`
-	Hostnames     []HostnameEntry  `json:"hostnames"`
-	ARPAlerts     []ARPSpoofAlert  `json:"arpAlerts"`
-	DNSAlerts     []DNSSpoofAlert  `json:"dnsAlerts"`
+	Mu              sync.RWMutex       `json:"-"`
+	Status          string             `json:"status"`
+	Progress        ProgressInfo       `json:"progress"`
+	Hosts           []HostEntry        `json:"hosts"`
+	Conflicts       []ConflictEntry    `json:"conflicts"`
+	DHCPServers     []DHCPServerJSON   `json:"dhcpServers"`
+	DHCPv6Servers   []DHCPv6ServerJSON `json:"dhcpv6Servers"`
+	HSRPEntries     []HSRPEntry        `json:"hsrpEntries"`
+	VRRPEntries     []VRRPEntry        `json:"vrrpEntries"`
+	LLDPNeighbors   []LLDPNeighbor     `json:"lldpNeighbors"`
+	CDPNeighbors    []CDPNeighbor      `json:"cdpNeighbors"`
+	Hostnames       []HostnameEntry    `json:"hostnames"`
+	ARPAlerts       []ARPSpoofAlert    `json:"arpAlerts"`
+	DNSAlerts       []DNSSpoofAlert    `json:"dnsAlerts"`
+	NDPAlerts       []NDPSpoofAlert    `json:"ndpAlerts"`
+	IPMode          IPMode             `json:"ipMode"`
 }
 
 // InterfaceInfo for the API
@@ -167,9 +227,13 @@ type InterfaceInfo struct {
 
 // AlertConfig represents a single alert rule
 type AlertConfig struct {
-	ID       string   `json:"id"`
-	Subnets  []string `json:"subnets"`          // monitored subnets (empty = all)
-	Events   []string `json:"events,omitempty"` // monitored events (empty = all)
+	ID        string   `json:"id"`
+	SubnetsV4 []string `json:"subnetsV4"`         // monitored IPv4 subnets (empty = all)
+	SubnetsV6 []string `json:"subnetsV6"`         // monitored IPv6 subnets (empty = all)
+	Subnets   []string `json:"subnets,omitempty"` // deprecated, migration only
+	EventsV4  []string `json:"eventsV4"`          // IPv4 events (empty = all)
+	EventsV6  []string `json:"eventsV6"`          // IPv6 events (empty = all)
+	Events    []string `json:"events,omitempty"`  // deprecated, migration only
 	Type     string   `json:"type"`             // "email"
 	SmtpHost string   `json:"smtpHost,omitempty"`
 	SmtpPort int      `json:"smtpPort,omitempty"`
