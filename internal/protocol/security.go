@@ -1,4 +1,4 @@
-package main
+package protocol
 
 import (
 	"context"
@@ -8,25 +8,28 @@ import (
 	"sync"
 	"time"
 
+	"net-finder/internal/models"
+	"net-finder/internal/netutil"
+
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
 
 // MonitorARP monitors ARP traffic for spoofing indicators
-func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string, duration time.Duration, stopCh <-chan struct{}) ([]ARPSpoofAlert, error) {
-	sock, err := NewRawSocket(ifaceName)
+func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string, duration time.Duration, stopCh <-chan struct{}) ([]models.ARPSpoofAlert, error) {
+	sock, err := netutil.NewRawSocket(ifaceName)
 	if err != nil {
 		return nil, fmt.Errorf("ARP 모니터 소켓 열기 실패: %v", err)
 	}
 	defer sock.Close()
 
-	if err := sock.SetBPFFilter(bpfFilterARP()); err != nil {
+	if err := sock.SetBPFFilter(netutil.BPFFilterARP()); err != nil {
 		return nil, fmt.Errorf("ARP 모니터 BPF 필터 설정 실패: %v", err)
 	}
 
 	// key -> alert index + packet count
 	alertIndex := make(map[string]int)
-	var alerts []ARPSpoofAlert
+	var alerts []models.ARPSpoofAlert
 	var mu sync.Mutex
 
 	deadline := time.Now().Add(duration)
@@ -91,7 +94,7 @@ func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string
 						severity = "critical"
 					}
 					alertIndex[key] = len(alerts)
-					alerts = append(alerts, ARPSpoofAlert{
+					alerts = append(alerts, models.ARPSpoofAlert{
 						IP:        ipStr,
 						OldMAC:    strings.Join(knownMACs, ", "),
 						NewMAC:    macStr,
@@ -111,13 +114,8 @@ func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string
 	return alerts, nil
 }
 
-type macChange struct {
-	mac string
-	t   time.Time
-}
-
 // CheckDNSSpoofing queries multiple DNS servers and compares results
-func CheckDNSSpoofing(dnsServers []string) []DNSSpoofAlert {
+func CheckDNSSpoofing(dnsServers []string) []models.DNSSpoofAlert {
 	if len(dnsServers) < 2 {
 		return nil
 	}
@@ -143,7 +141,7 @@ func CheckDNSSpoofing(dnsServers []string) []DNSSpoofAlert {
 		"github.com",
 	}
 
-	var alerts []DNSSpoofAlert
+	var alerts []models.DNSSpoofAlert
 
 	for _, domain := range testDomains {
 		type dnsResult struct {
@@ -192,7 +190,7 @@ func CheckDNSSpoofing(dnsServers []string) []DNSSpoofAlert {
 
 			// Check for suspiciously fast response (< 1ms)
 			if results[i].elapsed < 1*time.Millisecond {
-				alerts = append(alerts, DNSSpoofAlert{
+				alerts = append(alerts, models.DNSSpoofAlert{
 					Domain:    domain,
 					Server1:   results[i].server,
 					Response1: strings.Join(results[i].ips, ", "),
@@ -210,7 +208,7 @@ func CheckDNSSpoofing(dnsServers []string) []DNSSpoofAlert {
 
 				// Compare IP sets
 				if !ipSetsOverlap(results[i].ips, results[j].ips) {
-					alerts = append(alerts, DNSSpoofAlert{
+					alerts = append(alerts, models.DNSSpoofAlert{
 						Domain:    domain,
 						Server1:   results[i].server,
 						Response1: strings.Join(results[i].ips, ", "),

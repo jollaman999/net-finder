@@ -1,4 +1,4 @@
-package main
+package netutil
 
 import "golang.org/x/net/bpf"
 
@@ -9,8 +9,8 @@ const (
 	offDstMAC    = 0  // destination MAC starts at byte 0
 )
 
-// bpfFilterARP returns a BPF program that matches ARP frames (EtherType 0x0806).
-func bpfFilterARP() []bpf.RawInstruction {
+// BPFFilterARP returns a BPF program that matches ARP frames (EtherType 0x0806).
+func BPFFilterARP() []bpf.RawInstruction {
 	instrs, _ := bpf.Assemble([]bpf.Instruction{
 		bpf.LoadAbsolute{Off: offEtherType, Size: 2},
 		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x0806, SkipTrue: 0, SkipFalse: 1},
@@ -20,9 +20,9 @@ func bpfFilterARP() []bpf.RawInstruction {
 	return instrs
 }
 
-// bpfFilterDHCP returns a BPF program matching UDP port 67 or 68 (DHCP).
+// BPFFilterDHCP returns a BPF program matching UDP port 67 or 68 (DHCP).
 // EtherType==0x0800 && IP proto==17 && (srcPort==67||srcPort==68||dstPort==67||dstPort==68)
-func bpfFilterDHCP() []bpf.RawInstruction {
+func BPFFilterDHCP() []bpf.RawInstruction {
 	// IP header length is variable; we load it to compute UDP header offset.
 	instrs, _ := bpf.Assemble([]bpf.Instruction{
 		// Check EtherType == IPv4
@@ -49,9 +49,9 @@ func bpfFilterDHCP() []bpf.RawInstruction {
 	return instrs
 }
 
-// bpfFilterHSRP returns a BPF program matching UDP dst port 1985 (HSRP).
+// BPFFilterHSRP returns a BPF program matching UDP dst port 1985 (HSRP).
 // EtherType==0x0800 && IP proto==17 && dstPort==1985
-func bpfFilterHSRP() []bpf.RawInstruction {
+func BPFFilterHSRP() []bpf.RawInstruction {
 	instrs, _ := bpf.Assemble([]bpf.Instruction{
 		bpf.LoadAbsolute{Off: offEtherType, Size: 2},
 		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x0800, SkipTrue: 0, SkipFalse: 6},
@@ -66,9 +66,9 @@ func bpfFilterHSRP() []bpf.RawInstruction {
 	return instrs
 }
 
-// bpfFilterVRRP returns a BPF program matching IP protocol 112 (VRRP).
+// BPFFilterVRRP returns a BPF program matching IP protocol 112 (VRRP).
 // EtherType==0x0800 && IP proto==112
-func bpfFilterVRRP() []bpf.RawInstruction {
+func BPFFilterVRRP() []bpf.RawInstruction {
 	instrs, _ := bpf.Assemble([]bpf.Instruction{
 		bpf.LoadAbsolute{Off: offEtherType, Size: 2},
 		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x0800, SkipTrue: 0, SkipFalse: 3},
@@ -80,8 +80,8 @@ func bpfFilterVRRP() []bpf.RawInstruction {
 	return instrs
 }
 
-// bpfFilterLLDP returns a BPF program matching LLDP frames (EtherType 0x88CC).
-func bpfFilterLLDP() []bpf.RawInstruction {
+// BPFFilterLLDP returns a BPF program matching LLDP frames (EtherType 0x88CC).
+func BPFFilterLLDP() []bpf.RawInstruction {
 	instrs, _ := bpf.Assemble([]bpf.Instruction{
 		bpf.LoadAbsolute{Off: offEtherType, Size: 2},
 		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x88CC, SkipTrue: 0, SkipFalse: 1},
@@ -91,8 +91,8 @@ func bpfFilterLLDP() []bpf.RawInstruction {
 	return instrs
 }
 
-// bpfFilterCDP returns a BPF program matching CDP frames (dst MAC 01:00:0c:cc:cc:cc).
-func bpfFilterCDP() []bpf.RawInstruction {
+// BPFFilterCDP returns a BPF program matching CDP frames (dst MAC 01:00:0c:cc:cc:cc).
+func BPFFilterCDP() []bpf.RawInstruction {
 	instrs, _ := bpf.Assemble([]bpf.Instruction{
 		// Check first 4 bytes of dst MAC: 01:00:0c:cc
 		bpf.LoadAbsolute{Off: offDstMAC, Size: 4},

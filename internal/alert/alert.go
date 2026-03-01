@@ -1,4 +1,4 @@
-package main
+package alert
 
 import (
 	"crypto/aes"
@@ -17,28 +17,14 @@ import (
 	"strings"
 	"sync"
 	"time"
-)
 
-// AlertConfig represents a single alert rule
-type AlertConfig struct {
-	ID       string   `json:"id"`
-	Subnets  []string `json:"subnets"`          // monitored subnets (empty = all)
-	Events   []string `json:"events,omitempty"` // monitored events (empty = all)
-	Type     string   `json:"type"`             // "email"
-	SmtpHost string   `json:"smtpHost,omitempty"`
-	SmtpPort int      `json:"smtpPort,omitempty"`
-	SmtpFrom string   `json:"smtpFrom,omitempty"` // sender address (From)
-	SmtpTo   string   `json:"smtpTo,omitempty"`
-	SmtpSSL  bool     `json:"smtpSSL,omitempty"`
-	SmtpAuth bool     `json:"smtpAuth,omitempty"`
-	SmtpUser string   `json:"smtpUser,omitempty"` // auth credentials
-	SmtpPass string   `json:"smtpPass,omitempty"`
-}
+	"net-finder/internal/models"
+)
 
 // AlertManager manages alert configurations and dispatches alerts
 type AlertManager struct {
 	mu       sync.RWMutex
-	configs  []AlertConfig
+	configs  []models.AlertConfig
 	filePath string
 	encKey   [32]byte
 }
@@ -125,7 +111,7 @@ func (am *AlertManager) load() {
 		log.Printf("알림 설정 복호화 실패: %v", err)
 		return
 	}
-	var configs []AlertConfig
+	var configs []models.AlertConfig
 	if err := json.Unmarshal(plaintext, &configs); err != nil {
 		log.Printf("알림 설정 파싱 실패: %v", err)
 		return
@@ -151,16 +137,16 @@ func (am *AlertManager) save() {
 }
 
 // GetConfigs returns all alert configurations
-func (am *AlertManager) GetConfigs() []AlertConfig {
+func (am *AlertManager) GetConfigs() []models.AlertConfig {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
-	result := make([]AlertConfig, len(am.configs))
+	result := make([]models.AlertConfig, len(am.configs))
 	copy(result, am.configs)
 	return result
 }
 
 // AddConfig adds a new alert configuration and saves to file
-func (am *AlertManager) AddConfig(cfg AlertConfig) {
+func (am *AlertManager) AddConfig(cfg models.AlertConfig) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 	if cfg.ID == "" {
@@ -171,7 +157,7 @@ func (am *AlertManager) AddConfig(cfg AlertConfig) {
 }
 
 // UpdateConfig updates an existing alert configuration by ID and saves to file
-func (am *AlertManager) UpdateConfig(cfg AlertConfig) bool {
+func (am *AlertManager) UpdateConfig(cfg models.AlertConfig) bool {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 	for i, c := range am.configs {
@@ -199,12 +185,12 @@ func (am *AlertManager) DeleteConfig(id string) bool {
 }
 
 // SendConflictAlerts groups conflicts by subnet and sends one email per subnet per config
-func (am *AlertManager) SendConflictAlerts(conflicts []ConflictEntry) {
+func (am *AlertManager) SendConflictAlerts(conflicts []models.ConflictEntry) {
 	if len(conflicts) == 0 {
 		return
 	}
 	am.mu.RLock()
-	configs := make([]AlertConfig, len(am.configs))
+	configs := make([]models.AlertConfig, len(am.configs))
 	copy(configs, am.configs)
 	am.mu.RUnlock()
 
@@ -213,7 +199,7 @@ func (am *AlertManager) SendConflictAlerts(conflicts []ConflictEntry) {
 	}
 
 	// Group conflicts by subnet
-	bySubnet := make(map[string][]ConflictEntry)
+	bySubnet := make(map[string][]models.ConflictEntry)
 	var subnetOrder []string
 	for _, c := range conflicts {
 		key := c.Subnet
@@ -245,12 +231,12 @@ func (am *AlertManager) SendConflictAlerts(conflicts []ConflictEntry) {
 }
 
 // TestAlert sends test alert emails based on cfg.Events
-func (am *AlertManager) TestAlert(cfg AlertConfig) error {
+func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 	sent := 0
 	var lastErr error
 
 	if hasEvent(cfg, "conflicts") {
-		testConflicts := []ConflictEntry{
+		testConflicts := []models.ConflictEntry{
 			{IP: "192.168.1.100", MACs: []string{"AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02"}, Vendors: []string{"Vendor A", "Vendor B"}, Subnet: "192.168.1.0/24"},
 			{IP: "192.168.1.200", MACs: []string{"11:22:33:44:55:01", "11:22:33:44:55:02", "11:22:33:44:55:03"}, Vendors: []string{"Vendor C", "Vendor D", "Vendor E"}, Subnet: "192.168.1.0/24"},
 		}
@@ -264,7 +250,7 @@ func (am *AlertManager) TestAlert(cfg AlertConfig) error {
 	}
 
 	if hasEvent(cfg, "hosts") {
-		testHosts := []HostEntry{
+		testHosts := []models.HostEntry{
 			{IP: "192.168.1.1", Hostname: "gateway.local", MAC: "AA:BB:CC:DD:EE:01", Vendor: "Cisco Systems", Subnet: "192.168.1.0/24"},
 			{IP: "192.168.1.10", Hostname: "server.local", MAC: "11:22:33:44:55:66", Vendor: "Dell Inc.", Subnet: "192.168.1.0/24"},
 			{IP: "192.168.1.20", MAC: "FF:EE:DD:CC:BB:AA", Vendor: "HP Enterprise", Subnet: "192.168.1.0/24"},
@@ -279,7 +265,7 @@ func (am *AlertManager) TestAlert(cfg AlertConfig) error {
 	}
 
 	if hasEvent(cfg, "dhcp") {
-		testDHCP := []DHCPServerJSON{
+		testDHCP := []models.DHCPServerJSON{
 			{ServerIP: "192.168.1.1", ServerMAC: "AA:BB:CC:DD:EE:01", Vendor: "Cisco Systems", OfferedIP: "192.168.1.100", SubnetMask: "255.255.255.0", Router: "192.168.1.1", DNS: []string{"8.8.8.8", "8.8.4.4"}, LeaseTime: 86400},
 		}
 		subject := fmt.Sprintf("[Net Finder] DHCP Servers Detected (%d)", len(testDHCP))
@@ -292,10 +278,10 @@ func (am *AlertManager) TestAlert(cfg AlertConfig) error {
 	}
 
 	if hasEvent(cfg, "hsrp_vrrp") {
-		testHSRP := []HSRPEntry{
+		testHSRP := []models.HSRPEntry{
 			{Version: 2, Group: 1, Priority: 110, State: "Active", VirtualIP: "192.168.1.254", HelloTime: 3, HoldTime: 10, SourceIP: "192.168.1.2", SourceMAC: "00:00:0C:9F:F0:01", Timestamp: time.Now().Format("15:04:05")},
 		}
-		testVRRP := []VRRPEntry{
+		testVRRP := []models.VRRPEntry{
 			{Version: 3, RouterID: 1, Priority: 100, IPAddresses: []string{"192.168.1.254"}, AdverInt: 1, SourceIP: "192.168.1.3", SourceMAC: "00:00:5E:00:01:01", Timestamp: time.Now().Format("15:04:05")},
 		}
 		subject := "[Net Finder] HSRP/VRRP Detected"
@@ -308,10 +294,10 @@ func (am *AlertManager) TestAlert(cfg AlertConfig) error {
 	}
 
 	if hasEvent(cfg, "lldp_cdp") {
-		testLLDP := []LLDPNeighbor{
+		testLLDP := []models.LLDPNeighbor{
 			{ChassisID: "AA:BB:CC:DD:EE:01", PortID: "Gi0/1", SysName: "switch01.local", SysDesc: "Cisco IOS", MgmtAddr: "192.168.1.2", TTL: 120, SourceMAC: "AA:BB:CC:DD:EE:01", Timestamp: time.Now().Format("15:04:05")},
 		}
-		testCDP := []CDPNeighbor{
+		testCDP := []models.CDPNeighbor{
 			{DeviceID: "switch02.local", Addresses: []string{"192.168.1.3"}, PortID: "Gi0/2", Platform: "cisco WS-C3750", Version: "15.0(2)SE", NativeVLAN: 1, SourceMAC: "11:22:33:44:55:66", Timestamp: time.Now().Format("15:04:05")},
 		}
 		subject := "[Net Finder] LLDP/CDP Neighbors Detected"
@@ -324,15 +310,15 @@ func (am *AlertManager) TestAlert(cfg AlertConfig) error {
 	}
 
 	if hasEvent(cfg, "arp_spoofing") || hasEvent(cfg, "dns_spoofing") {
-		var arpAlerts []ARPSpoofAlert
-		var dnsAlerts []DNSSpoofAlert
+		var arpAlerts []models.ARPSpoofAlert
+		var dnsAlerts []models.DNSSpoofAlert
 		if hasEvent(cfg, "arp_spoofing") {
-			arpAlerts = []ARPSpoofAlert{
+			arpAlerts = []models.ARPSpoofAlert{
 				{IP: "192.168.1.1", OldMAC: "AA:BB:CC:DD:EE:01", NewMAC: "FF:FF:FF:00:11:22", AlertType: "gateway_mac_change", Severity: "critical", Message: "Gateway 192.168.1.1 MAC changed", Count: 5, FirstSeen: time.Now().Add(-2 * time.Minute).Format("15:04:05"), Timestamp: time.Now().Format("15:04:05"), Subnet: "192.168.1.0/24"},
 			}
 		}
 		if hasEvent(cfg, "dns_spoofing") {
-			dnsAlerts = []DNSSpoofAlert{
+			dnsAlerts = []models.DNSSpoofAlert{
 				{Domain: "example.com", Server1: "8.8.8.8", Response1: "93.184.216.34", Server2: "192.168.1.1", Response2: "10.0.0.99", AlertType: "dns_mismatch", Severity: "critical", Message: "DNS response mismatch for example.com", Timestamp: time.Now().Format("15:04:05")},
 			}
 		}
@@ -347,7 +333,7 @@ func (am *AlertManager) TestAlert(cfg AlertConfig) error {
 
 	// If no events selected, send default IP Conflict test for backward compatibility
 	if sent == 0 && lastErr == nil {
-		testConflicts := []ConflictEntry{
+		testConflicts := []models.ConflictEntry{
 			{IP: "192.168.1.100", MACs: []string{"AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02"}, Vendors: []string{"Vendor A", "Vendor B"}, Subnet: "192.168.1.0/24"},
 		}
 		subject := fmt.Sprintf("[Net Finder] IP Conflict — %s (%d)", "192.168.1.0/24", len(testConflicts))
@@ -357,7 +343,7 @@ func (am *AlertManager) TestAlert(cfg AlertConfig) error {
 	return lastErr
 }
 
-func matchesSubnetStr(cfg AlertConfig, subnet string) bool {
+func matchesSubnetStr(cfg models.AlertConfig, subnet string) bool {
 	if len(cfg.Subnets) == 0 {
 		return true
 	}
@@ -369,7 +355,7 @@ func matchesSubnetStr(cfg AlertConfig, subnet string) bool {
 	return false
 }
 
-func hasEvent(cfg AlertConfig, event string) bool {
+func hasEvent(cfg models.AlertConfig, event string) bool {
 	if len(cfg.Events) == 0 {
 		return true
 	}
@@ -381,7 +367,7 @@ func hasEvent(cfg AlertConfig, event string) bool {
 	return false
 }
 
-func buildHTMLReport(subnet string, conflicts []ConflictEntry) string {
+func buildHTMLReport(subnet string, conflicts []models.ConflictEntry) string {
 	now := time.Now().Format("2006-01-02 15:04:05")
 
 	var b strings.Builder
@@ -455,7 +441,7 @@ func vendorsToHTML(vendors []string) []string {
 	return out
 }
 
-func sendEmailHTML(cfg AlertConfig, subject, htmlBody string) error {
+func sendEmailHTML(cfg models.AlertConfig, subject, htmlBody string) error {
 	if cfg.SmtpHost == "" || cfg.SmtpTo == "" || cfg.SmtpFrom == "" {
 		return fmt.Errorf("SMTP host, sender and recipient required")
 	}
@@ -484,7 +470,7 @@ func sendEmailHTML(cfg AlertConfig, subject, htmlBody string) error {
 }
 
 // sendEmailSSL connects via implicit TLS (port 465)
-func sendEmailSSL(cfg AlertConfig, addr, from, msg string) error {
+func sendEmailSSL(cfg models.AlertConfig, addr, from, msg string) error {
 	tlsCfg := &tls.Config{ServerName: cfg.SmtpHost}
 	conn, err := tls.Dial("tcp", addr, tlsCfg)
 	if err != nil {
@@ -525,12 +511,12 @@ func sendEmailSSL(cfg AlertConfig, addr, from, msg string) error {
 }
 
 // SendSecurityAlerts sends a security alert email for ARP/DNS spoofing events
-func (am *AlertManager) SendSecurityAlerts(arpAlerts []ARPSpoofAlert, dnsAlerts []DNSSpoofAlert) {
+func (am *AlertManager) SendSecurityAlerts(arpAlerts []models.ARPSpoofAlert, dnsAlerts []models.DNSSpoofAlert) {
 	if len(arpAlerts) == 0 && len(dnsAlerts) == 0 {
 		return
 	}
 	am.mu.RLock()
-	configs := make([]AlertConfig, len(am.configs))
+	configs := make([]models.AlertConfig, len(am.configs))
 	copy(configs, am.configs)
 	am.mu.RUnlock()
 
@@ -540,7 +526,7 @@ func (am *AlertManager) SendSecurityAlerts(arpAlerts []ARPSpoofAlert, dnsAlerts 
 
 	for _, cfg := range configs {
 		// Filter ARP alerts by subnet and event
-		var filteredARP []ARPSpoofAlert
+		var filteredARP []models.ARPSpoofAlert
 		if hasEvent(cfg, "arp_spoofing") {
 			for _, a := range arpAlerts {
 				subnet := a.Subnet
@@ -554,7 +540,7 @@ func (am *AlertManager) SendSecurityAlerts(arpAlerts []ARPSpoofAlert, dnsAlerts 
 		}
 
 		// Filter DNS alerts by event
-		var filteredDNS []DNSSpoofAlert
+		var filteredDNS []models.DNSSpoofAlert
 		if hasEvent(cfg, "dns_spoofing") {
 			filteredDNS = dnsAlerts
 		}
@@ -572,12 +558,12 @@ func (am *AlertManager) SendSecurityAlerts(arpAlerts []ARPSpoofAlert, dnsAlerts 
 }
 
 // SendHostAlerts sends host discovery alerts grouped by subnet
-func (am *AlertManager) SendHostAlerts(hosts []HostEntry) {
+func (am *AlertManager) SendHostAlerts(hosts []models.HostEntry) {
 	if len(hosts) == 0 {
 		return
 	}
 	am.mu.RLock()
-	configs := make([]AlertConfig, len(am.configs))
+	configs := make([]models.AlertConfig, len(am.configs))
 	copy(configs, am.configs)
 	am.mu.RUnlock()
 
@@ -585,7 +571,7 @@ func (am *AlertManager) SendHostAlerts(hosts []HostEntry) {
 		return
 	}
 
-	bySubnet := make(map[string][]HostEntry)
+	bySubnet := make(map[string][]models.HostEntry)
 	var subnetOrder []string
 	for _, h := range hosts {
 		key := h.Subnet
@@ -617,12 +603,12 @@ func (am *AlertManager) SendHostAlerts(hosts []HostEntry) {
 }
 
 // SendDHCPAlerts sends DHCP server detection alerts
-func (am *AlertManager) SendDHCPAlerts(servers []DHCPServerJSON) {
+func (am *AlertManager) SendDHCPAlerts(servers []models.DHCPServerJSON) {
 	if len(servers) == 0 {
 		return
 	}
 	am.mu.RLock()
-	configs := make([]AlertConfig, len(am.configs))
+	configs := make([]models.AlertConfig, len(am.configs))
 	copy(configs, am.configs)
 	am.mu.RUnlock()
 
@@ -643,12 +629,12 @@ func (am *AlertManager) SendDHCPAlerts(servers []DHCPServerJSON) {
 }
 
 // SendProtocolAlerts sends HSRP/VRRP detection alerts
-func (am *AlertManager) SendProtocolAlerts(hsrp []HSRPEntry, vrrp []VRRPEntry) {
+func (am *AlertManager) SendProtocolAlerts(hsrp []models.HSRPEntry, vrrp []models.VRRPEntry) {
 	if len(hsrp) == 0 && len(vrrp) == 0 {
 		return
 	}
 	am.mu.RLock()
-	configs := make([]AlertConfig, len(am.configs))
+	configs := make([]models.AlertConfig, len(am.configs))
 	copy(configs, am.configs)
 	am.mu.RUnlock()
 
@@ -676,12 +662,12 @@ func (am *AlertManager) SendProtocolAlerts(hsrp []HSRPEntry, vrrp []VRRPEntry) {
 }
 
 // SendDiscoveryAlerts sends LLDP/CDP neighbor detection alerts
-func (am *AlertManager) SendDiscoveryAlerts(lldp []LLDPNeighbor, cdp []CDPNeighbor) {
+func (am *AlertManager) SendDiscoveryAlerts(lldp []models.LLDPNeighbor, cdp []models.CDPNeighbor) {
 	if len(lldp) == 0 && len(cdp) == 0 {
 		return
 	}
 	am.mu.RLock()
-	configs := make([]AlertConfig, len(am.configs))
+	configs := make([]models.AlertConfig, len(am.configs))
 	copy(configs, am.configs)
 	am.mu.RUnlock()
 
@@ -708,7 +694,7 @@ func (am *AlertManager) SendDiscoveryAlerts(lldp []LLDPNeighbor, cdp []CDPNeighb
 	}
 }
 
-func buildSecuritySubject(arpAlerts []ARPSpoofAlert, dnsAlerts []DNSSpoofAlert) string {
+func buildSecuritySubject(arpAlerts []models.ARPSpoofAlert, dnsAlerts []models.DNSSpoofAlert) string {
 	var parts []string
 	if len(arpAlerts) > 0 {
 		parts = append(parts, fmt.Sprintf("ARP Spoofing (%d)", len(arpAlerts)))
@@ -719,7 +705,7 @@ func buildSecuritySubject(arpAlerts []ARPSpoofAlert, dnsAlerts []DNSSpoofAlert) 
 	return fmt.Sprintf("[Net Finder] Security Alert — %s", strings.Join(parts, ", "))
 }
 
-func buildSecurityHTMLReport(arpAlerts []ARPSpoofAlert, dnsAlerts []DNSSpoofAlert) string {
+func buildSecurityHTMLReport(arpAlerts []models.ARPSpoofAlert, dnsAlerts []models.DNSSpoofAlert) string {
 	now := time.Now().Format("2006-01-02 15:04:05")
 	total := len(arpAlerts) + len(dnsAlerts)
 
@@ -727,14 +713,11 @@ func buildSecurityHTMLReport(arpAlerts []ARPSpoofAlert, dnsAlerts []DNSSpoofAler
 	b.WriteString(`<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f5f5">`)
 	b.WriteString(`<div style="max-width:800px;margin:20px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1)">`)
 
-	// Header (deep orange)
 	b.WriteString(`<div style="background:#e65100;color:#fff;padding:20px 24px">`)
 	b.WriteString(`<h2 style="margin:0 0 4px;font-size:18px">Security Alert</h2>`)
-	b.WriteString(fmt.Sprintf(`<div style="font-size:13px;opacity:0.9">%d alert(s) &nbsp;|&nbsp; %s</div>`,
-		total, htmlEsc(now)))
+	b.WriteString(fmt.Sprintf(`<div style="font-size:13px;opacity:0.9">%d alert(s) &nbsp;|&nbsp; %s</div>`, total, htmlEsc(now)))
 	b.WriteString(`</div>`)
 
-	// ARP Spoofing section
 	if len(arpAlerts) > 0 {
 		b.WriteString(`<div style="padding:16px 24px">`)
 		b.WriteString(fmt.Sprintf(`<h3 style="margin:0 0 12px;font-size:15px;color:#e65100">ARP Spoofing (%d)</h3>`, len(arpAlerts)))
@@ -768,11 +751,9 @@ func buildSecurityHTMLReport(arpAlerts []ARPSpoofAlert, dnsAlerts []DNSSpoofAler
 			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;white-space:nowrap">%s</td>`, htmlEsc(a.Timestamp)))
 			b.WriteString(`</tr>`)
 		}
-
 		b.WriteString(`</tbody></table></div>`)
 	}
 
-	// DNS Spoofing section
 	if len(dnsAlerts) > 0 {
 		b.WriteString(`<div style="padding:16px 24px">`)
 		b.WriteString(fmt.Sprintf(`<h3 style="margin:0 0 12px;font-size:15px;color:#e65100">DNS Spoofing (%d)</h3>`, len(dnsAlerts)))
@@ -798,19 +779,16 @@ func buildSecurityHTMLReport(arpAlerts []ARPSpoofAlert, dnsAlerts []DNSSpoofAler
 			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;white-space:nowrap">%s</td>`, htmlEsc(a.Timestamp)))
 			b.WriteString(`</tr>`)
 		}
-
 		b.WriteString(`</tbody></table></div>`)
 	}
 
-	// Footer
 	b.WriteString(`<div style="padding:12px 24px;background:#f5f5f5;font-size:12px;color:#999;text-align:center">`)
 	b.WriteString(`Sent by <strong>Net Finder</strong></div>`)
 	b.WriteString(`</div></body></html>`)
-
 	return b.String()
 }
 
-func buildHostHTMLReport(subnet string, hosts []HostEntry) string {
+func buildHostHTMLReport(subnet string, hosts []models.HostEntry) string {
 	now := time.Now().Format("2006-01-02 15:04:05")
 
 	var b strings.Builder
@@ -833,13 +811,13 @@ func buildHostHTMLReport(subnet string, hosts []HostEntry) string {
 	b.WriteString(`</tr></thead><tbody>`)
 
 	for _, h := range hosts {
-		hostname := h.Hostname
-		if hostname == "" {
-			hostname = "-"
+		hn := h.Hostname
+		if hn == "" {
+			hn = "-"
 		}
 		b.WriteString(`<tr style="border-bottom:1px solid #eee">`)
 		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-weight:600;white-space:nowrap">%s</td>`, htmlEsc(h.IP)))
-		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;color:#666">%s</td>`, htmlEsc(hostname)))
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;color:#666">%s</td>`, htmlEsc(hn)))
 		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-family:'Courier New',monospace;font-size:13px;white-space:nowrap">%s</td>`, htmlEsc(h.MAC)))
 		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px">%s</td>`, htmlEsc(h.Vendor)))
 		b.WriteString(`</tr>`)
@@ -852,7 +830,7 @@ func buildHostHTMLReport(subnet string, hosts []HostEntry) string {
 	return b.String()
 }
 
-func buildDHCPHTMLReport(servers []DHCPServerJSON) string {
+func buildDHCPHTMLReport(servers []models.DHCPServerJSON) string {
 	now := time.Now().Format("2006-01-02 15:04:05")
 
 	var b strings.Builder
@@ -861,8 +839,7 @@ func buildDHCPHTMLReport(servers []DHCPServerJSON) string {
 
 	b.WriteString(`<div style="background:#388e3c;color:#fff;padding:20px 24px">`)
 	b.WriteString(`<h2 style="margin:0 0 4px;font-size:18px">DHCP Servers Detected</h2>`)
-	b.WriteString(fmt.Sprintf(`<div style="font-size:13px;opacity:0.9">%d server(s) &nbsp;|&nbsp; %s</div>`,
-		len(servers), htmlEsc(now)))
+	b.WriteString(fmt.Sprintf(`<div style="font-size:13px;opacity:0.9">%d server(s) &nbsp;|&nbsp; %s</div>`, len(servers), htmlEsc(now)))
 	b.WriteString(`</div>`)
 
 	b.WriteString(`<div style="padding:16px 24px">`)
@@ -895,7 +872,7 @@ func buildDHCPHTMLReport(servers []DHCPServerJSON) string {
 	return b.String()
 }
 
-func buildProtocolHTMLReport(hsrp []HSRPEntry, vrrp []VRRPEntry) string {
+func buildProtocolHTMLReport(hsrp []models.HSRPEntry, vrrp []models.VRRPEntry) string {
 	now := time.Now().Format("2006-01-02 15:04:05")
 	total := len(hsrp) + len(vrrp)
 
@@ -905,15 +882,13 @@ func buildProtocolHTMLReport(hsrp []HSRPEntry, vrrp []VRRPEntry) string {
 
 	b.WriteString(`<div style="background:#7b1fa2;color:#fff;padding:20px 24px">`)
 	b.WriteString(`<h2 style="margin:0 0 4px;font-size:18px">HSRP/VRRP Detected</h2>`)
-	b.WriteString(fmt.Sprintf(`<div style="font-size:13px;opacity:0.9">%d entry(ies) &nbsp;|&nbsp; %s</div>`,
-		total, htmlEsc(now)))
+	b.WriteString(fmt.Sprintf(`<div style="font-size:13px;opacity:0.9">%d entry(ies) &nbsp;|&nbsp; %s</div>`, total, htmlEsc(now)))
 	b.WriteString(`</div>`)
 
 	if len(hsrp) > 0 {
 		b.WriteString(`<div style="padding:16px 24px">`)
 		b.WriteString(fmt.Sprintf(`<h3 style="margin:0 0 12px;font-size:15px;color:#7b1fa2">HSRP (%d)</h3>`, len(hsrp)))
-		b.WriteString(`<table style="width:100%;border-collapse:collapse;font-size:14px">`)
-		b.WriteString(`<thead><tr style="background:#f5f5f5">`)
+		b.WriteString(`<table style="width:100%;border-collapse:collapse;font-size:14px"><thead><tr style="background:#f5f5f5">`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #7b1fa2;font-weight:600;white-space:nowrap">Version</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #7b1fa2;font-weight:600;white-space:nowrap">Group</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #7b1fa2;font-weight:600;white-space:nowrap">State</th>`)
@@ -922,7 +897,6 @@ func buildProtocolHTMLReport(hsrp []HSRPEntry, vrrp []VRRPEntry) string {
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #7b1fa2;font-weight:600;white-space:nowrap">Source IP</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #7b1fa2;font-weight:600;white-space:nowrap">Time</th>`)
 		b.WriteString(`</tr></thead><tbody>`)
-
 		for _, e := range hsrp {
 			b.WriteString(`<tr style="border-bottom:1px solid #eee">`)
 			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px">v%d</td>`, e.Version))
@@ -940,8 +914,7 @@ func buildProtocolHTMLReport(hsrp []HSRPEntry, vrrp []VRRPEntry) string {
 	if len(vrrp) > 0 {
 		b.WriteString(`<div style="padding:16px 24px">`)
 		b.WriteString(fmt.Sprintf(`<h3 style="margin:0 0 12px;font-size:15px;color:#7b1fa2">VRRP (%d)</h3>`, len(vrrp)))
-		b.WriteString(`<table style="width:100%;border-collapse:collapse;font-size:14px">`)
-		b.WriteString(`<thead><tr style="background:#f5f5f5">`)
+		b.WriteString(`<table style="width:100%;border-collapse:collapse;font-size:14px"><thead><tr style="background:#f5f5f5">`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #7b1fa2;font-weight:600;white-space:nowrap">Version</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #7b1fa2;font-weight:600;white-space:nowrap">Router ID</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #7b1fa2;font-weight:600;white-space:nowrap">Priority</th>`)
@@ -950,7 +923,6 @@ func buildProtocolHTMLReport(hsrp []HSRPEntry, vrrp []VRRPEntry) string {
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #7b1fa2;font-weight:600;white-space:nowrap">Adver Int</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #7b1fa2;font-weight:600;white-space:nowrap">Time</th>`)
 		b.WriteString(`</tr></thead><tbody>`)
-
 		for _, e := range vrrp {
 			ips := strings.Join(e.IPAddresses, ", ")
 			b.WriteString(`<tr style="border-bottom:1px solid #eee">`)
@@ -972,7 +944,7 @@ func buildProtocolHTMLReport(hsrp []HSRPEntry, vrrp []VRRPEntry) string {
 	return b.String()
 }
 
-func buildDiscoveryHTMLReport(lldp []LLDPNeighbor, cdp []CDPNeighbor) string {
+func buildDiscoveryHTMLReport(lldp []models.LLDPNeighbor, cdp []models.CDPNeighbor) string {
 	now := time.Now().Format("2006-01-02 15:04:05")
 	total := len(lldp) + len(cdp)
 
@@ -982,22 +954,19 @@ func buildDiscoveryHTMLReport(lldp []LLDPNeighbor, cdp []CDPNeighbor) string {
 
 	b.WriteString(`<div style="background:#0097a7;color:#fff;padding:20px 24px">`)
 	b.WriteString(`<h2 style="margin:0 0 4px;font-size:18px">LLDP/CDP Neighbors Detected</h2>`)
-	b.WriteString(fmt.Sprintf(`<div style="font-size:13px;opacity:0.9">%d neighbor(s) &nbsp;|&nbsp; %s</div>`,
-		total, htmlEsc(now)))
+	b.WriteString(fmt.Sprintf(`<div style="font-size:13px;opacity:0.9">%d neighbor(s) &nbsp;|&nbsp; %s</div>`, total, htmlEsc(now)))
 	b.WriteString(`</div>`)
 
 	if len(lldp) > 0 {
 		b.WriteString(`<div style="padding:16px 24px">`)
 		b.WriteString(fmt.Sprintf(`<h3 style="margin:0 0 12px;font-size:15px;color:#0097a7">LLDP (%d)</h3>`, len(lldp)))
-		b.WriteString(`<table style="width:100%;border-collapse:collapse;font-size:14px">`)
-		b.WriteString(`<thead><tr style="background:#f5f5f5">`)
+		b.WriteString(`<table style="width:100%;border-collapse:collapse;font-size:14px"><thead><tr style="background:#f5f5f5">`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #0097a7;font-weight:600;white-space:nowrap">Chassis ID</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #0097a7;font-weight:600;white-space:nowrap">Port ID</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #0097a7;font-weight:600;white-space:nowrap">System Name</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #0097a7;font-weight:600;white-space:nowrap">Mgmt Address</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #0097a7;font-weight:600;white-space:nowrap">Time</th>`)
 		b.WriteString(`</tr></thead><tbody>`)
-
 		for _, e := range lldp {
 			b.WriteString(`<tr style="border-bottom:1px solid #eee">`)
 			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-family:'Courier New',monospace;font-size:13px;white-space:nowrap">%s</td>`, htmlEsc(e.ChassisID)))
@@ -1013,15 +982,13 @@ func buildDiscoveryHTMLReport(lldp []LLDPNeighbor, cdp []CDPNeighbor) string {
 	if len(cdp) > 0 {
 		b.WriteString(`<div style="padding:16px 24px">`)
 		b.WriteString(fmt.Sprintf(`<h3 style="margin:0 0 12px;font-size:15px;color:#0097a7">CDP (%d)</h3>`, len(cdp)))
-		b.WriteString(`<table style="width:100%;border-collapse:collapse;font-size:14px">`)
-		b.WriteString(`<thead><tr style="background:#f5f5f5">`)
+		b.WriteString(`<table style="width:100%;border-collapse:collapse;font-size:14px"><thead><tr style="background:#f5f5f5">`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #0097a7;font-weight:600;white-space:nowrap">Device ID</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #0097a7;font-weight:600;white-space:nowrap">Address</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #0097a7;font-weight:600;white-space:nowrap">Platform</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #0097a7;font-weight:600;white-space:nowrap">Port ID</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #0097a7;font-weight:600;white-space:nowrap">Time</th>`)
 		b.WriteString(`</tr></thead><tbody>`)
-
 		for _, e := range cdp {
 			addrs := strings.Join(e.Addresses, ", ")
 			b.WriteString(`<tr style="border-bottom:1px solid #eee">`)
@@ -1042,7 +1009,7 @@ func buildDiscoveryHTMLReport(lldp []LLDPNeighbor, cdp []CDPNeighbor) string {
 }
 
 // sendEmailStartTLS connects plain then upgrades via STARTTLS if available
-func sendEmailStartTLS(cfg AlertConfig, addr, from, msg string) error {
+func sendEmailStartTLS(cfg models.AlertConfig, addr, from, msg string) error {
 	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("dial failed: %v", err)

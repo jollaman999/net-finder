@@ -1,4 +1,4 @@
-package main
+package netutil
 
 import (
 	"errors"

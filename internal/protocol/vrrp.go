@@ -1,26 +1,29 @@
-package main
+package protocol
 
 import (
 	"fmt"
 	"time"
+
+	"net-finder/internal/models"
+	"net-finder/internal/netutil"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
 
 // ListenVRRP listens for VRRP packets on the given interface
-func ListenVRRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}) ([]VRRPEntry, error) {
-	sock, err := NewRawSocket(ifaceName)
+func ListenVRRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}) ([]models.VRRPEntry, error) {
+	sock, err := netutil.NewRawSocket(ifaceName)
 	if err != nil {
 		return nil, fmt.Errorf("VRRP 소켓 열기 실패: %v", err)
 	}
 	defer sock.Close()
 
-	if err := sock.SetBPFFilter(bpfFilterVRRP()); err != nil {
+	if err := sock.SetBPFFilter(netutil.BPFFilterVRRP()); err != nil {
 		return nil, fmt.Errorf("VRRP BPF 필터 설정 실패: %v", err)
 	}
 
-	var entries []VRRPEntry
+	var entries []models.VRRPEntry
 	seen := make(map[string]bool)
 	deadline := time.Now().Add(duration)
 
@@ -64,8 +67,8 @@ func ListenVRRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}
 	return entries, nil
 }
 
-func parseVRRPPacket(packet gopacket.Packet) (VRRPEntry, bool) {
-	var entry VRRPEntry
+func parseVRRPPacket(packet gopacket.Packet) (models.VRRPEntry, bool) {
+	var entry models.VRRPEntry
 
 	// Try gopacket VRRP layer first
 	vrrpLayer := packet.Layer(layers.LayerTypeVRRP)

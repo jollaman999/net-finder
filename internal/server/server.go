@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"embed"
@@ -7,12 +7,17 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+
+	"net-finder/internal/alert"
+	"net-finder/internal/models"
+	"net-finder/internal/scanner"
 )
 
 //go:embed web/index.html
 var webFS embed.FS
 
-func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentIface string) error {
+// StartWebServer starts the HTTP server with API endpoints
+func StartWebServer(port int, sc *scanner.Scanner, alertMgr *alert.AlertManager, currentIface string) error {
 	mux := http.NewServeMux()
 
 	// Serve SPA
@@ -28,7 +33,7 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, scanner.GetStatus())
+		writeJSON(w, sc.GetStatus())
 	})
 
 	mux.HandleFunc("/api/scan/start", func(w http.ResponseWriter, r *http.Request) {
@@ -36,11 +41,11 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if scanner.IsRunning() {
+		if sc.IsRunning() {
 			writeJSON(w, map[string]string{"error": "스캔이 이미 실행 중입니다"})
 			return
 		}
-		scanner.Start()
+		sc.Start()
 		writeJSON(w, map[string]string{"status": "started"})
 	})
 
@@ -49,7 +54,7 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		scanner.Stop()
+		sc.Stop()
 		writeJSON(w, map[string]string{"status": "stopped"})
 	})
 
@@ -58,7 +63,7 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, scanner.GetHosts())
+		writeJSON(w, sc.GetHosts())
 	})
 
 	mux.HandleFunc("/api/conflicts", func(w http.ResponseWriter, r *http.Request) {
@@ -66,7 +71,7 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, scanner.GetConflicts())
+		writeJSON(w, sc.GetConflicts())
 	})
 
 	mux.HandleFunc("/api/dhcp", func(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +79,7 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, scanner.GetDHCPServers())
+		writeJSON(w, sc.GetDHCPServers())
 	})
 
 	mux.HandleFunc("/api/hsrp", func(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +87,7 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, scanner.GetHSRP())
+		writeJSON(w, sc.GetHSRP())
 	})
 
 	mux.HandleFunc("/api/vrrp", func(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +95,7 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, scanner.GetVRRP())
+		writeJSON(w, sc.GetVRRP())
 	})
 
 	mux.HandleFunc("/api/lldp", func(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +103,7 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, scanner.GetLLDP())
+		writeJSON(w, sc.GetLLDP())
 	})
 
 	mux.HandleFunc("/api/cdp", func(w http.ResponseWriter, r *http.Request) {
@@ -106,7 +111,7 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, scanner.GetCDP())
+		writeJSON(w, sc.GetCDP())
 	})
 
 	mux.HandleFunc("/api/hostnames", func(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +119,7 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, scanner.GetHostnames())
+		writeJSON(w, sc.GetHostnames())
 	})
 
 	mux.HandleFunc("/api/security/arp", func(w http.ResponseWriter, r *http.Request) {
@@ -122,7 +127,7 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, scanner.GetARPAlerts())
+		writeJSON(w, sc.GetARPAlerts())
 	})
 
 	mux.HandleFunc("/api/security/dns", func(w http.ResponseWriter, r *http.Request) {
@@ -130,7 +135,7 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, scanner.GetDNSAlerts())
+		writeJSON(w, sc.GetDNSAlerts())
 	})
 
 	mux.HandleFunc("/api/interfaces", func(w http.ResponseWriter, r *http.Request) {
@@ -138,7 +143,7 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		writeJSON(w, GetInterfaces(currentIface))
+		writeJSON(w, scanner.GetInterfaces(currentIface))
 	})
 
 	mux.HandleFunc("/api/alerts", func(w http.ResponseWriter, r *http.Request) {
@@ -146,7 +151,7 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 		case http.MethodGet:
 			writeJSON(w, alertMgr.GetConfigs())
 		case http.MethodPost:
-			var cfg AlertConfig
+			var cfg models.AlertConfig
 			if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 				http.Error(w, "Invalid JSON", http.StatusBadRequest)
 				return
@@ -158,7 +163,7 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			alertMgr.AddConfig(cfg)
 			writeJSON(w, map[string]string{"status": "ok"})
 		case http.MethodPut:
-			var cfg AlertConfig
+			var cfg models.AlertConfig
 			if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 				http.Error(w, "Invalid JSON", http.StatusBadRequest)
 				return
@@ -197,7 +202,7 @@ func startWebServer(port int, scanner *Scanner, alertMgr *AlertManager, currentI
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		var cfg AlertConfig
+		var cfg models.AlertConfig
 		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 			http.Error(w, "Invalid JSON", http.StatusBadRequest)
 			return

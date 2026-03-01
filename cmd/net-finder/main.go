@@ -10,7 +10,15 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"net-finder/internal/alert"
+	"net-finder/internal/netutil"
+	"net-finder/internal/protocol"
+	"net-finder/internal/scanner"
+	"net-finder/internal/server"
 )
+
+var version string
 
 func main() {
 	ifaceName := flag.String("i", "", "네트워크 인터페이스 (미지정시 자동 감지)")
@@ -37,12 +45,12 @@ func main() {
 	}
 
 	// Get network interface
-	iface, err := getInterface(*ifaceName)
+	iface, err := netutil.GetInterface(*ifaceName)
 	if err != nil {
 		log.Fatalf("인터페이스 감지 실패: %v", err)
 	}
 
-	localIP, localMAC, err := getInterfaceAddr(iface)
+	localIP, localMAC, err := netutil.GetInterfaceAddr(iface)
 	if err != nil {
 		log.Fatalf("인터페이스 주소 가져오기 실패: %v", err)
 	}
@@ -50,13 +58,13 @@ func main() {
 	// Parse subnets
 	var subnets []*net.IPNet
 	if *subnetStr != "" {
-		subnets = parseSubnets(*subnetStr, iface)
+		subnets = netutil.ParseSubnets(*subnetStr, iface)
 	} else {
 		// Auto-discover from interface
-		subnets = parseSubnets("", iface)
+		subnets = netutil.ParseSubnets("", iface)
 
 		// Also try ARP-based discovery
-		discovered, err := DiscoverSubnets(iface, 5*time.Second)
+		discovered, err := protocol.DiscoverSubnets(iface, 5*time.Second)
 		if err == nil {
 			seen := make(map[string]bool)
 			for _, s := range subnets {
@@ -84,13 +92,12 @@ func main() {
 	log.Printf("서브넷: %s", strings.Join(subnetStrs, ", "))
 
 	// Initialize alert manager and scanner
-	alertMgr := NewAlertManager()
-	scanner := NewScanner(iface, localIP, localMAC, subnets)
-	scanner.alertMgr = alertMgr
+	alertMgr := alert.NewAlertManager()
+	sc := scanner.NewScanner(iface, localIP, localMAC, subnets, alertMgr)
 
 	if *autoScan {
 		log.Println("자동 스캔 시작...")
-		scanner.Start()
+		sc.Start()
 	}
 
 	// Try to open browser
@@ -101,7 +108,7 @@ func main() {
 	}()
 
 	log.Printf("웹 서버 시작: %s", addr)
-	if err := startWebServer(*port, scanner, alertMgr, iface.Name); err != nil {
+	if err := server.StartWebServer(*port, sc, alertMgr, iface.Name); err != nil {
 		log.Fatalf("웹 서버 실패: %v", err)
 	}
 }

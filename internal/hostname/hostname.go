@@ -1,4 +1,4 @@
-package main
+package hostname
 
 import (
 	"bufio"
@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"net-finder/internal/models"
 )
 
 // ResolveHostnames resolves hostnames for a list of IPs using multiple methods:
@@ -19,7 +21,7 @@ import (
 // 4. SNMP sysName (UDP 161) - network devices / servers with SNMP
 // 5. TLS Certificate CN/SAN (TCP 443) - HTTPS servers, ESXi, etc.
 // 6. SMTP Banner (TCP 25) - mail servers
-func ResolveHostnames(ips []string) []HostnameEntry {
+func ResolveHostnames(ips []string) []models.HostnameEntry {
 	if len(ips) == 0 {
 		return nil
 	}
@@ -75,9 +77,9 @@ func ResolveHostnames(ips []string) []HostnameEntry {
 	close(ch)
 	wg.Wait()
 
-	var results []HostnameEntry
+	var results []models.HostnameEntry
 	for ip, hostname := range resolved {
-		results = append(results, HostnameEntry{IP: ip, Hostname: hostname})
+		results = append(results, models.HostnameEntry{IP: ip, Hostname: hostname})
 	}
 	return results
 }

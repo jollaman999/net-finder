@@ -1,32 +1,25 @@
-package main
+package protocol
 
 import (
 	"fmt"
 	"net"
 	"time"
 
+	"net-finder/internal/models"
+	"net-finder/internal/netutil"
+
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
 
-type DHCPServerInfo struct {
-	ServerIP   net.IP
-	ServerMAC  net.HardwareAddr
-	OfferedIP  net.IP
-	SubnetMask net.IPMask
-	Router     net.IP
-	DNS        []net.IP
-	LeaseTime  uint32
-}
-
-func DetectDHCP(iface *net.Interface, localMAC net.HardwareAddr, timeout time.Duration) ([]DHCPServerInfo, error) {
-	sock, err := NewRawSocket(iface.Name)
+func DetectDHCP(iface *net.Interface, localMAC net.HardwareAddr, timeout time.Duration) ([]models.DHCPServerInfo, error) {
+	sock, err := netutil.NewRawSocket(iface.Name)
 	if err != nil {
 		return nil, fmt.Errorf("소켓 열기 실패: %v", err)
 	}
 	defer sock.Close()
 
-	if err := sock.SetBPFFilter(bpfFilterDHCP()); err != nil {
+	if err := sock.SetBPFFilter(netutil.BPFFilterDHCP()); err != nil {
 		return nil, fmt.Errorf("BPF 필터 설정 실패: %v", err)
 	}
 
@@ -39,7 +32,7 @@ func DetectDHCP(iface *net.Interface, localMAC net.HardwareAddr, timeout time.Du
 	return listenDHCPOffers(sock, xid, timeout)
 }
 
-func sendDHCPDiscover(sock *RawSocket, iface *net.Interface, srcMAC net.HardwareAddr, xid uint32) error {
+func sendDHCPDiscover(sock *netutil.RawSocket, iface *net.Interface, srcMAC net.HardwareAddr, xid uint32) error {
 	eth := layers.Ethernet{
 		SrcMAC:       srcMAC,
 		DstMAC:       net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
@@ -96,8 +89,8 @@ func sendDHCPDiscover(sock *RawSocket, iface *net.Interface, srcMAC net.Hardware
 	return sock.WritePacket(buf.Bytes())
 }
 
-func listenDHCPOffers(sock *RawSocket, xid uint32, timeout time.Duration) ([]DHCPServerInfo, error) {
-	var servers []DHCPServerInfo
+func listenDHCPOffers(sock *netutil.RawSocket, xid uint32, timeout time.Duration) ([]models.DHCPServerInfo, error) {
+	var servers []models.DHCPServerInfo
 	seen := make(map[string]bool)
 
 	deadline := time.Now().Add(timeout)
@@ -132,7 +125,7 @@ func listenDHCPOffers(sock *RawSocket, xid uint32, timeout time.Duration) ([]DHC
 			continue
 		}
 
-		server := DHCPServerInfo{
+		server := models.DHCPServerInfo{
 			OfferedIP: dhcp.YourClientIP,
 		}
 

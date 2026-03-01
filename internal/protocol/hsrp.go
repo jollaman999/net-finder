@@ -1,9 +1,12 @@
-package main
+package protocol
 
 import (
 	"fmt"
 	"net"
 	"time"
+
+	"net-finder/internal/models"
+	"net-finder/internal/netutil"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -20,18 +23,18 @@ var hsrpStateNames = map[byte]string{
 }
 
 // ListenHSRP listens for HSRP packets on the given interface
-func ListenHSRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}) ([]HSRPEntry, error) {
-	sock, err := NewRawSocket(ifaceName)
+func ListenHSRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}) ([]models.HSRPEntry, error) {
+	sock, err := netutil.NewRawSocket(ifaceName)
 	if err != nil {
 		return nil, fmt.Errorf("HSRP 소켓 열기 실패: %v", err)
 	}
 	defer sock.Close()
 
-	if err := sock.SetBPFFilter(bpfFilterHSRP()); err != nil {
+	if err := sock.SetBPFFilter(netutil.BPFFilterHSRP()); err != nil {
 		return nil, fmt.Errorf("HSRP BPF 필터 설정 실패: %v", err)
 	}
 
-	var entries []HSRPEntry
+	var entries []models.HSRPEntry
 	seen := make(map[string]bool)
 	deadline := time.Now().Add(duration)
 
@@ -76,8 +79,8 @@ func ListenHSRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}
 	return entries, nil
 }
 
-func parseHSRPPacket(packet gopacket.Packet) (HSRPEntry, bool) {
-	var entry HSRPEntry
+func parseHSRPPacket(packet gopacket.Packet) (models.HSRPEntry, bool) {
+	var entry models.HSRPEntry
 
 	// Get source IP
 	ipLayer := packet.Layer(layers.LayerTypeIPv4)
@@ -118,7 +121,7 @@ func parseHSRPPacket(packet gopacket.Packet) (HSRPEntry, bool) {
 	return entry, false
 }
 
-func parseHSRPv1(data []byte, entry HSRPEntry) (HSRPEntry, bool) {
+func parseHSRPv1(data []byte, entry models.HSRPEntry) (models.HSRPEntry, bool) {
 	if len(data) < 20 {
 		return entry, false
 	}
@@ -152,7 +155,7 @@ func parseHSRPv1(data []byte, entry HSRPEntry) (HSRPEntry, bool) {
 	return entry, true
 }
 
-func parseHSRPv2(data []byte, entry HSRPEntry) (HSRPEntry, bool) {
+func parseHSRPv2(data []byte, entry models.HSRPEntry) (models.HSRPEntry, bool) {
 	if len(data) < 4 {
 		return entry, false
 	}

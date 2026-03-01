@@ -1,4 +1,4 @@
-package main
+package protocol
 
 import (
 	"encoding/binary"
@@ -8,13 +8,15 @@ import (
 	"sync"
 	"time"
 
+	"net-finder/internal/netutil"
+
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
 
 type ARPResult struct {
 	Entries map[string][]net.HardwareAddr // IP string -> list of MACs
-	mu      sync.Mutex
+	Mu      sync.Mutex
 }
 
 func NewARPResult() *ARPResult {
@@ -24,8 +26,8 @@ func NewARPResult() *ARPResult {
 }
 
 func (r *ARPResult) Add(ip net.IP, mac net.HardwareAddr) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.Mu.Lock()
+	defer r.Mu.Unlock()
 
 	ipStr := ip.String()
 	macStr := mac.String()
@@ -64,13 +66,13 @@ func subnetSourceIP(subnet *net.IPNet, localIP net.IP) net.IP {
 }
 
 func DiscoverSubnets(iface *net.Interface, duration time.Duration) ([]*net.IPNet, error) {
-	sock, err := NewRawSocket(iface.Name)
+	sock, err := netutil.NewRawSocket(iface.Name)
 	if err != nil {
 		return nil, fmt.Errorf("소켓 열기 실패: %v", err)
 	}
 	defer sock.Close()
 
-	if err := sock.SetBPFFilter(bpfFilterARP()); err != nil {
+	if err := sock.SetBPFFilter(netutil.BPFFilterARP()); err != nil {
 		return nil, fmt.Errorf("BPF 필터 설정 실패: %v", err)
 	}
 
@@ -120,13 +122,13 @@ func DiscoverSubnets(iface *net.Interface, duration time.Duration) ([]*net.IPNet
 }
 
 func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, subnets []*net.IPNet, timeout time.Duration) (*ARPResult, error) {
-	sock, err := NewRawSocket(iface.Name)
+	sock, err := netutil.NewRawSocket(iface.Name)
 	if err != nil {
 		return nil, fmt.Errorf("소켓 열기 실패: %v", err)
 	}
 	defer sock.Close()
 
-	if err := sock.SetBPFFilter(bpfFilterARP()); err != nil {
+	if err := sock.SetBPFFilter(netutil.BPFFilterARP()); err != nil {
 		return nil, fmt.Errorf("BPF 필터 설정 실패: %v", err)
 	}
 
@@ -148,7 +150,7 @@ func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, su
 	srcIPMap := make(map[string]net.IP) // target IP string -> source IP to use
 	for _, subnet := range subnets {
 		srcIP := subnetSourceIP(subnet, localIP)
-		for _, ip := range expandCIDR(subnet) {
+		for _, ip := range netutil.ExpandCIDR(subnet) {
 			targets = append(targets, ip)
 			srcIPMap[ip.String()] = srcIP
 		}
@@ -168,13 +170,13 @@ func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, su
 	// Rounds 2-3: retry missing IPs
 	for retry := 0; retry < 2; retry++ {
 		var missing []net.IP
-		result.mu.Lock()
+		result.Mu.Lock()
 		for _, ip := range targets {
 			if _, ok := result.Entries[ip.String()]; !ok {
 				missing = append(missing, ip)
 			}
 		}
-		result.mu.Unlock()
+		result.Mu.Unlock()
 
 		if len(missing) == 0 {
 			break
@@ -194,13 +196,13 @@ func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, su
 
 	// Phase 3: ICMP fallback for hosts that didn't respond to ARP
 	var finalMissing []net.IP
-	result.mu.Lock()
+	result.Mu.Lock()
 	for _, ip := range targets {
 		if _, ok := result.Entries[ip.String()]; !ok {
 			finalMissing = append(finalMissing, ip)
 		}
 	}
-	result.mu.Unlock()
+	result.Mu.Unlock()
 
 	if len(finalMissing) > 0 {
 		icmpFallbackScan(iface, localIP, localMAC, subnets, finalMissing, result)
@@ -209,7 +211,7 @@ func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, su
 	return result, nil
 }
 
-func sendARPRequest(sock *RawSocket, iface *net.Interface, srcIP net.IP, srcMAC net.HardwareAddr, dstIP net.IP) error {
+func sendARPRequest(sock *netutil.RawSocket, iface *net.Interface, srcIP net.IP, srcMAC net.HardwareAddr, dstIP net.IP) error {
 	eth := layers.Ethernet{
 		SrcMAC:       srcMAC,
 		DstMAC:       net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
@@ -241,7 +243,7 @@ func sendARPRequest(sock *RawSocket, iface *net.Interface, srcIP net.IP, srcMAC 
 	return sock.WritePacket(buf.Bytes())
 }
 
-func readARPResponses(sock *RawSocket, result *ARPResult, done <-chan struct{}) {
+func readARPResponses(sock *netutil.RawSocket, result *ARPResult, done <-chan struct{}) {
 	for {
 		select {
 		case <-done:
@@ -302,7 +304,7 @@ func icmpFallbackScan(iface *net.Interface, localIP net.IP, localMAC net.Hardwar
 
 	log.Printf("ICMP 폴백 스캔: %d개 미응답 IP", len(missing))
 
-	sock, err := NewRawSocket(iface.Name)
+	sock, err := netutil.NewRawSocket(iface.Name)
 	if err != nil {
 		log.Printf("ICMP 폴백 소켓 오류: %v", err)
 		return
@@ -429,7 +431,7 @@ func icmpFallbackScan(iface *net.Interface, localIP net.IP, localMAC net.Hardwar
 }
 
 // sendICMPEcho sends a raw ICMP echo request at the Ethernet level.
-func sendICMPEcho(sock *RawSocket, srcIP net.IP, srcMAC, dstMAC net.HardwareAddr, dstIP net.IP) error {
+func sendICMPEcho(sock *netutil.RawSocket, srcIP net.IP, srcMAC, dstMAC net.HardwareAddr, dstIP net.IP) error {
 	eth := layers.Ethernet{
 		SrcMAC:       srcMAC,
 		DstMAC:       dstMAC,

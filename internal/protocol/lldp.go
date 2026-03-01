@@ -1,4 +1,4 @@
-package main
+package protocol
 
 import (
 	"fmt"
@@ -6,23 +6,26 @@ import (
 	"strings"
 	"time"
 
+	"net-finder/internal/models"
+	"net-finder/internal/netutil"
+
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
 
 // ListenLLDP listens for LLDP frames on the given interface
-func ListenLLDP(ifaceName string, duration time.Duration, stopCh <-chan struct{}) ([]LLDPNeighbor, error) {
-	sock, err := NewRawSocket(ifaceName)
+func ListenLLDP(ifaceName string, duration time.Duration, stopCh <-chan struct{}) ([]models.LLDPNeighbor, error) {
+	sock, err := netutil.NewRawSocket(ifaceName)
 	if err != nil {
 		return nil, fmt.Errorf("LLDP 소켓 열기 실패: %v", err)
 	}
 	defer sock.Close()
 
-	if err := sock.SetBPFFilter(bpfFilterLLDP()); err != nil {
+	if err := sock.SetBPFFilter(netutil.BPFFilterLLDP()); err != nil {
 		return nil, fmt.Errorf("LLDP BPF 필터 설정 실패: %v", err)
 	}
 
-	var entries []LLDPNeighbor
+	var entries []models.LLDPNeighbor
 	seen := make(map[string]bool)
 	deadline := time.Now().Add(duration)
 
@@ -66,8 +69,8 @@ func ListenLLDP(ifaceName string, duration time.Duration, stopCh <-chan struct{}
 	return entries, nil
 }
 
-func parseLLDPPacket(packet gopacket.Packet) (LLDPNeighbor, bool) {
-	var entry LLDPNeighbor
+func parseLLDPPacket(packet gopacket.Packet) (models.LLDPNeighbor, bool) {
+	var entry models.LLDPNeighbor
 
 	// Get source MAC
 	ethLayer := packet.Layer(layers.LayerTypeEthernet)

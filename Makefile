@@ -13,7 +13,7 @@ LDFLAGS   := -s -w -X main.version=$(VERSION)
 all: build
 
 build:
-	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $(BINARY) .
+	$(GO) build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $(BINARY) ./cmd/net-finder
 
 clean:
 	rm -f $(BINARY)

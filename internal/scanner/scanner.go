@@ -1,4 +1,4 @@
-package main
+package scanner
 
 import (
 	"fmt"
@@ -7,156 +7,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"net-finder/internal/alert"
+	"net-finder/internal/hostname"
+	"net-finder/internal/models"
+	"net-finder/internal/netutil"
+	"net-finder/internal/oui"
+	"net-finder/internal/protocol"
 )
-
-// ProgressInfo represents scan progress
-type ProgressInfo struct {
-	Phase   string `json:"phase"`
-	Percent int    `json:"percent"`
-	Count   int    `json:"count,omitempty"`
-}
-
-// HostEntry represents a discovered host
-type HostEntry struct {
-	IP          string   `json:"ip"`
-	Hostname    string   `json:"hostname"`
-	MAC         string   `json:"mac"`
-	Vendor      string   `json:"vendor"`
-	Subnet      string   `json:"subnet"`
-	IsBond      bool     `json:"isBond,omitempty"`
-	BondMACs    []string `json:"bondMACs,omitempty"`
-	BondVendors []string `json:"bondVendors,omitempty"`
-}
-
-// ConflictEntry represents an IP conflict
-type ConflictEntry struct {
-	IP       string   `json:"ip"`
-	Hostname string   `json:"hostname"`
-	MACs     []string `json:"macs"`
-	Vendors  []string `json:"vendors"`
-	Subnet   string   `json:"subnet"`
-}
-
-// DHCPServerJSON is the JSON-friendly DHCP server info
-type DHCPServerJSON struct {
-	ServerIP   string   `json:"serverIP"`
-	ServerMAC  string   `json:"serverMAC"`
-	Vendor     string   `json:"vendor"`
-	OfferedIP  string   `json:"offeredIP"`
-	SubnetMask string   `json:"subnetMask"`
-	Router     string   `json:"router"`
-	DNS        []string `json:"dns"`
-	LeaseTime  uint32   `json:"leaseTime"`
-}
-
-// HSRPEntry represents an HSRP advertisement
-type HSRPEntry struct {
-	Version   int    `json:"version"`
-	Group     int    `json:"group"`
-	Priority  int    `json:"priority"`
-	State     string `json:"state"`
-	VirtualIP string `json:"virtualIP"`
-	HelloTime int    `json:"helloTime"`
-	HoldTime  int    `json:"holdTime"`
-	SourceIP  string `json:"sourceIP"`
-	SourceMAC string `json:"sourceMAC"`
-	Timestamp string `json:"timestamp"`
-}
-
-// VRRPEntry represents a VRRP advertisement
-type VRRPEntry struct {
-	Version     int      `json:"version"`
-	RouterID    int      `json:"routerID"`
-	Priority    int      `json:"priority"`
-	IPAddresses []string `json:"ipAddresses"`
-	AdverInt    int      `json:"adverInt"`
-	SourceIP    string   `json:"sourceIP"`
-	SourceMAC   string   `json:"sourceMAC"`
-	Timestamp   string   `json:"timestamp"`
-}
-
-// LLDPNeighbor represents an LLDP neighbor
-type LLDPNeighbor struct {
-	ChassisID string `json:"chassisID"`
-	PortID    string `json:"portID"`
-	SysName   string `json:"sysName"`
-	SysDesc   string `json:"sysDesc"`
-	MgmtAddr  string `json:"mgmtAddr"`
-	TTL       int    `json:"ttl"`
-	SourceMAC string `json:"sourceMAC"`
-	Timestamp string `json:"timestamp"`
-}
-
-// CDPNeighbor represents a CDP neighbor
-type CDPNeighbor struct {
-	DeviceID   string   `json:"deviceID"`
-	Addresses  []string `json:"addresses"`
-	PortID     string   `json:"portID"`
-	Platform   string   `json:"platform"`
-	Version    string   `json:"version"`
-	NativeVLAN int      `json:"nativeVLAN"`
-	SourceMAC  string   `json:"sourceMAC"`
-	Timestamp  string   `json:"timestamp"`
-}
-
-// HostnameEntry maps IP to hostname
-type HostnameEntry struct {
-	IP       string `json:"ip"`
-	Hostname string `json:"hostname"`
-}
-
-// ARPSpoofAlert represents an ARP spoofing alert
-type ARPSpoofAlert struct {
-	IP        string `json:"ip"`
-	OldMAC    string `json:"oldMAC"`
-	NewMAC    string `json:"newMAC"`
-	AlertType string `json:"alertType"`
-	Severity  string `json:"severity"`
-	Message   string `json:"message"`
-	Count     int    `json:"count"`
-	FirstSeen string `json:"firstSeen"`
-	Timestamp string `json:"timestamp"`
-	Subnet    string `json:"subnet"`
-}
-
-// DNSSpoofAlert represents a DNS spoofing alert
-type DNSSpoofAlert struct {
-	Domain    string `json:"domain"`
-	Server1   string `json:"server1"`
-	Response1 string `json:"response1"`
-	Server2   string `json:"server2"`
-	Response2 string `json:"response2"`
-	AlertType string `json:"alertType"`
-	Severity  string `json:"severity"`
-	Message   string `json:"message"`
-	Timestamp string `json:"timestamp"`
-}
-
-// ScanState holds all scan results
-type ScanState struct {
-	mu            sync.RWMutex
-	Status        string           `json:"status"`
-	Progress      ProgressInfo     `json:"progress"`
-	Hosts         []HostEntry      `json:"hosts"`
-	Conflicts     []ConflictEntry  `json:"conflicts"`
-	DHCPServers   []DHCPServerJSON `json:"dhcpServers"`
-	HSRPEntries   []HSRPEntry      `json:"hsrpEntries"`
-	VRRPEntries   []VRRPEntry      `json:"vrrpEntries"`
-	LLDPNeighbors []LLDPNeighbor   `json:"lldpNeighbors"`
-	CDPNeighbors  []CDPNeighbor    `json:"cdpNeighbors"`
-	Hostnames     []HostnameEntry  `json:"hostnames"`
-	ARPAlerts     []ARPSpoofAlert  `json:"arpAlerts"`
-	DNSAlerts     []DNSSpoofAlert  `json:"dnsAlerts"`
-}
-
-// InterfaceInfo for the API
-type InterfaceInfo struct {
-	Name    string   `json:"name"`
-	MAC     string   `json:"mac"`
-	IPs     []string `json:"ips"`
-	Up      bool     `json:"up"`
-	Current bool     `json:"current"`
-}
 
 // Scanner orchestrates all scanning operations
 type Scanner struct {
@@ -164,30 +22,31 @@ type Scanner struct {
 	localIP  net.IP
 	localMAC net.HardwareAddr
 	subnets  []*net.IPNet
-	oui      *OUIDatabase
-	alertMgr *AlertManager
+	oui      *oui.OUIDatabase
+	alertMgr *alert.AlertManager
 
-	state ScanState
+	state models.ScanState
 
-	stopCh  chan struct{}
+	stopCh   chan struct{}
 	bgStopCh chan struct{}
-	running bool
-	runMu   sync.Mutex
+	running  bool
+	runMu    sync.Mutex
 
-	arpResult      *ARPResult
+	arpResult      *protocol.ARPResult
 	hostnameMap    map[string]string
 	hostnameMu     sync.RWMutex
 	emailedARPKeys map[string]bool
 }
 
 // NewScanner creates a new Scanner instance
-func NewScanner(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, subnets []*net.IPNet) *Scanner {
+func NewScanner(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, subnets []*net.IPNet, alertMgr *alert.AlertManager) *Scanner {
 	return &Scanner{
 		iface:    iface,
 		localIP:  localIP,
 		localMAC: localMAC,
 		subnets:  subnets,
-		state: ScanState{
+		alertMgr: alertMgr,
+		state: models.ScanState{
 			Status: "idle",
 		},
 		hostnameMap:    make(map[string]string),
@@ -225,10 +84,10 @@ func (s *Scanner) Stop() {
 		close(s.bgStopCh)
 	}
 	s.running = false
-	s.state.mu.Lock()
+	s.state.Mu.Lock()
 	s.state.Status = "idle"
-	s.state.Progress = ProgressInfo{}
-	s.state.mu.Unlock()
+	s.state.Progress = models.ProgressInfo{}
+	s.state.Mu.Unlock()
 }
 
 // IsRunning returns whether a scan is active
@@ -248,24 +107,24 @@ func (s *Scanner) stopped() bool {
 }
 
 func (s *Scanner) setProgress(phase string, percent, count int) {
-	s.state.mu.Lock()
-	s.state.Progress = ProgressInfo{
+	s.state.Mu.Lock()
+	s.state.Progress = models.ProgressInfo{
 		Phase:   phase,
 		Percent: percent,
 		Count:   count,
 	}
-	s.state.mu.Unlock()
+	s.state.Mu.Unlock()
 }
 
 // GetStatus returns current scan status and progress
 func (s *Scanner) GetStatus() map[string]interface{} {
-	s.state.mu.RLock()
-	defer s.state.mu.RUnlock()
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 	subnetStrs := make([]string, len(s.subnets))
 	for i, sn := range s.subnets {
 		subnetStrs[i] = sn.String()
 	}
-	sortCIDRStrings(subnetStrs)
+	netutil.SortCIDRStrings(subnetStrs)
 	return map[string]interface{}{
 		"status":   s.state.Status,
 		"progress": s.state.Progress,
@@ -274,113 +133,113 @@ func (s *Scanner) GetStatus() map[string]interface{} {
 }
 
 // GetHosts returns the host list
-func (s *Scanner) GetHosts() []HostEntry {
-	s.state.mu.RLock()
-	defer s.state.mu.RUnlock()
+func (s *Scanner) GetHosts() []models.HostEntry {
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 	if s.state.Hosts == nil {
-		return []HostEntry{}
+		return []models.HostEntry{}
 	}
 	return s.state.Hosts
 }
 
 // GetConflicts returns conflict entries
-func (s *Scanner) GetConflicts() []ConflictEntry {
-	s.state.mu.RLock()
-	defer s.state.mu.RUnlock()
+func (s *Scanner) GetConflicts() []models.ConflictEntry {
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 	if s.state.Conflicts == nil {
-		return []ConflictEntry{}
+		return []models.ConflictEntry{}
 	}
 	return s.state.Conflicts
 }
 
 // GetDHCPServers returns detected DHCP servers
-func (s *Scanner) GetDHCPServers() []DHCPServerJSON {
-	s.state.mu.RLock()
-	defer s.state.mu.RUnlock()
+func (s *Scanner) GetDHCPServers() []models.DHCPServerJSON {
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 	if s.state.DHCPServers == nil {
-		return []DHCPServerJSON{}
+		return []models.DHCPServerJSON{}
 	}
 	return s.state.DHCPServers
 }
 
 // GetHSRP returns HSRP entries
-func (s *Scanner) GetHSRP() []HSRPEntry {
-	s.state.mu.RLock()
-	defer s.state.mu.RUnlock()
+func (s *Scanner) GetHSRP() []models.HSRPEntry {
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 	if s.state.HSRPEntries == nil {
-		return []HSRPEntry{}
+		return []models.HSRPEntry{}
 	}
 	return s.state.HSRPEntries
 }
 
 // GetVRRP returns VRRP entries
-func (s *Scanner) GetVRRP() []VRRPEntry {
-	s.state.mu.RLock()
-	defer s.state.mu.RUnlock()
+func (s *Scanner) GetVRRP() []models.VRRPEntry {
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 	if s.state.VRRPEntries == nil {
-		return []VRRPEntry{}
+		return []models.VRRPEntry{}
 	}
 	return s.state.VRRPEntries
 }
 
 // GetLLDP returns LLDP neighbors
-func (s *Scanner) GetLLDP() []LLDPNeighbor {
-	s.state.mu.RLock()
-	defer s.state.mu.RUnlock()
+func (s *Scanner) GetLLDP() []models.LLDPNeighbor {
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 	if s.state.LLDPNeighbors == nil {
-		return []LLDPNeighbor{}
+		return []models.LLDPNeighbor{}
 	}
 	return s.state.LLDPNeighbors
 }
 
 // GetCDP returns CDP neighbors
-func (s *Scanner) GetCDP() []CDPNeighbor {
-	s.state.mu.RLock()
-	defer s.state.mu.RUnlock()
+func (s *Scanner) GetCDP() []models.CDPNeighbor {
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 	if s.state.CDPNeighbors == nil {
-		return []CDPNeighbor{}
+		return []models.CDPNeighbor{}
 	}
 	return s.state.CDPNeighbors
 }
 
 // GetHostnames returns hostname entries
-func (s *Scanner) GetHostnames() []HostnameEntry {
-	s.state.mu.RLock()
-	defer s.state.mu.RUnlock()
+func (s *Scanner) GetHostnames() []models.HostnameEntry {
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 	if s.state.Hostnames == nil {
-		return []HostnameEntry{}
+		return []models.HostnameEntry{}
 	}
 	return s.state.Hostnames
 }
 
 // GetARPAlerts returns ARP spoof alerts
-func (s *Scanner) GetARPAlerts() []ARPSpoofAlert {
-	s.state.mu.RLock()
-	defer s.state.mu.RUnlock()
+func (s *Scanner) GetARPAlerts() []models.ARPSpoofAlert {
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 	if s.state.ARPAlerts == nil {
-		return []ARPSpoofAlert{}
+		return []models.ARPSpoofAlert{}
 	}
 	return s.state.ARPAlerts
 }
 
 // GetDNSAlerts returns DNS spoof alerts
-func (s *Scanner) GetDNSAlerts() []DNSSpoofAlert {
-	s.state.mu.RLock()
-	defer s.state.mu.RUnlock()
+func (s *Scanner) GetDNSAlerts() []models.DNSSpoofAlert {
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 	if s.state.DNSAlerts == nil {
-		return []DNSSpoofAlert{}
+		return []models.DNSSpoofAlert{}
 	}
 	return s.state.DNSAlerts
 }
 
 // GetInterfaces returns available network interfaces
-func GetInterfaces(currentIface string) []InterfaceInfo {
+func GetInterfaces(currentIface string) []models.InterfaceInfo {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil
 	}
 
-	var result []InterfaceInfo
+	var result []models.InterfaceInfo
 	for _, iface := range ifaces {
 		if iface.Flags&net.FlagLoopback != 0 {
 			continue
@@ -389,7 +248,7 @@ func GetInterfaces(currentIface string) []InterfaceInfo {
 			continue
 		}
 
-		info := InterfaceInfo{
+		info := models.InterfaceInfo{
 			Name:    iface.Name,
 			MAC:     iface.HardwareAddr.String(),
 			Up:      iface.Flags&net.FlagUp != 0,
@@ -420,7 +279,7 @@ func (s *Scanner) run() {
 
 	s.emailedARPKeys = make(map[string]bool)
 
-	s.state.mu.Lock()
+	s.state.Mu.Lock()
 	s.state.Status = "running"
 	s.state.Hosts = nil
 	s.state.Conflicts = nil
@@ -432,7 +291,7 @@ func (s *Scanner) run() {
 	s.state.Hostnames = nil
 	s.state.ARPAlerts = nil
 	s.state.DNSAlerts = nil
-	s.state.mu.Unlock()
+	s.state.Mu.Unlock()
 
 	// Phase 1: Load OUI (0-5%)
 	s.setProgress("oui_loading", 0, 0)
@@ -440,17 +299,15 @@ func (s *Scanner) run() {
 		return
 	}
 
-	oui, err := LoadOUI()
+	ouiDB, err := oui.LoadOUI()
 	if err != nil {
 		log.Printf("OUI 로드 실패: %v", err)
-		oui = &OUIDatabase{
-			Vendors:  make(map[string]string),
-			prefix2:  make(map[[2]byte]string),
-			apiCache: make(map[string]string),
+		ouiDB = &oui.OUIDatabase{
+			Vendors: make(map[string]string),
 		}
 	}
-	s.oui = oui
-	s.setProgress("oui_done", 5, len(oui.Vendors))
+	s.oui = ouiDB
+	s.setProgress("oui_done", 5, len(ouiDB.Vendors))
 	if s.stopped() {
 		return
 	}
@@ -464,7 +321,7 @@ func (s *Scanner) run() {
 	scanWg.Add(1)
 	go func() {
 		defer scanWg.Done()
-		result, err := ARPScan(s.iface, s.localIP, s.localMAC, s.subnets, 3*time.Second)
+		result, err := protocol.ARPScan(s.iface, s.localIP, s.localMAC, s.subnets, 3*time.Second)
 		if err != nil {
 			log.Printf("ARP 스캔 실패: %v", err)
 			return
@@ -484,7 +341,7 @@ func (s *Scanner) run() {
 	scanWg.Add(1)
 	go func() {
 		defer scanWg.Done()
-		servers, err := DetectDHCP(s.iface, s.localMAC, 5*time.Second)
+		servers, err := protocol.DetectDHCP(s.iface, s.localMAC, 5*time.Second)
 		if err != nil {
 			log.Printf("DHCP 감지 실패: %v", err)
 			return
@@ -502,47 +359,47 @@ func (s *Scanner) run() {
 	scanWg.Add(4)
 	go func() {
 		defer scanWg.Done()
-		entries, err := ListenHSRP(s.iface.Name, 30*time.Second, s.stopCh)
+		entries, err := protocol.ListenHSRP(s.iface.Name, 30*time.Second, s.stopCh)
 		if err != nil {
 			log.Printf("HSRP 리스너 오류: %v", err)
 			return
 		}
-		s.state.mu.Lock()
+		s.state.Mu.Lock()
 		s.state.HSRPEntries = append(s.state.HSRPEntries, entries...)
-		s.state.mu.Unlock()
+		s.state.Mu.Unlock()
 	}()
 	go func() {
 		defer scanWg.Done()
-		entries, err := ListenVRRP(s.iface.Name, 30*time.Second, s.stopCh)
+		entries, err := protocol.ListenVRRP(s.iface.Name, 30*time.Second, s.stopCh)
 		if err != nil {
 			log.Printf("VRRP 리스너 오류: %v", err)
 			return
 		}
-		s.state.mu.Lock()
+		s.state.Mu.Lock()
 		s.state.VRRPEntries = append(s.state.VRRPEntries, entries...)
-		s.state.mu.Unlock()
+		s.state.Mu.Unlock()
 	}()
 	go func() {
 		defer scanWg.Done()
-		entries, err := ListenLLDP(s.iface.Name, 30*time.Second, s.stopCh)
+		entries, err := protocol.ListenLLDP(s.iface.Name, 30*time.Second, s.stopCh)
 		if err != nil {
 			log.Printf("LLDP 리스너 오류: %v", err)
 			return
 		}
-		s.state.mu.Lock()
+		s.state.Mu.Lock()
 		s.state.LLDPNeighbors = append(s.state.LLDPNeighbors, entries...)
-		s.state.mu.Unlock()
+		s.state.Mu.Unlock()
 	}()
 	go func() {
 		defer scanWg.Done()
-		entries, err := ListenCDP(s.iface.Name, 30*time.Second, s.stopCh)
+		entries, err := protocol.ListenCDP(s.iface.Name, 30*time.Second, s.stopCh)
 		if err != nil {
 			log.Printf("CDP 리스너 오류: %v", err)
 			return
 		}
-		s.state.mu.Lock()
+		s.state.Mu.Lock()
 		s.state.CDPNeighbors = append(s.state.CDPNeighbors, entries...)
-		s.state.mu.Unlock()
+		s.state.Mu.Unlock()
 	}()
 
 	scanWg.Wait()
@@ -552,9 +409,9 @@ func (s *Scanner) run() {
 	}
 
 	s.setProgress("scan_done", 100, 0)
-	s.state.mu.Lock()
+	s.state.Mu.Lock()
 	s.state.Status = "done"
-	s.state.mu.Unlock()
+	s.state.Mu.Unlock()
 
 	// Start background listeners
 	go s.backgroundProtocolListeners()
@@ -563,12 +420,12 @@ func (s *Scanner) run() {
 
 // processARPResults converts ARPResult into Hosts and Conflicts
 // All discovered IPs go into Hosts. Only real conflicts (not bonds) go into Conflicts.
-func (s *Scanner) processARPResults(result *ARPResult) {
-	result.mu.Lock()
-	defer result.mu.Unlock()
+func (s *Scanner) processARPResults(result *protocol.ARPResult) {
+	result.Mu.Lock()
+	defer result.Mu.Unlock()
 
-	var hosts []HostEntry
-	var conflicts []ConflictEntry
+	var hosts []models.HostEntry
+	var conflicts []models.ConflictEntry
 
 	for ipStr, macs := range result.Entries {
 		ip := net.ParseIP(ipStr)
@@ -582,7 +439,7 @@ func (s *Scanner) processARPResults(result *ARPResult) {
 		}
 
 		// Every IP goes into the host list
-		host := HostEntry{
+		host := models.HostEntry{
 			IP:     ipStr,
 			MAC:    strings.ToUpper(mac.String()),
 			Vendor: vendor,
@@ -591,7 +448,7 @@ func (s *Scanner) processARPResults(result *ARPResult) {
 
 		// Multiple MACs → check if bond or real conflict
 		if len(macs) > 1 {
-			devGroups := groupMACsByDevice(macs)
+			devGroups := netutil.GroupMACsByDevice(macs)
 			isBond := len(devGroups) == 1
 
 			var macStrs []string
@@ -608,7 +465,7 @@ func (s *Scanner) processARPResults(result *ARPResult) {
 				host.BondMACs = macStrs
 				host.BondVendors = vendorStrs
 			} else {
-				conflicts = append(conflicts, ConflictEntry{
+				conflicts = append(conflicts, models.ConflictEntry{
 					IP:      ipStr,
 					MACs:    macStrs,
 					Vendors: vendorStrs,
@@ -625,20 +482,20 @@ func (s *Scanner) processARPResults(result *ARPResult) {
 	for i, h := range hosts {
 		ips[i] = h.IP
 	}
-	sortIPStrings(ips)
+	netutil.SortIPStrings(ips)
 	ipIndex := make(map[string]int)
 	for i, ip := range ips {
 		ipIndex[ip] = i
 	}
-	sorted := make([]HostEntry, len(hosts))
+	sorted := make([]models.HostEntry, len(hosts))
 	for _, h := range hosts {
 		sorted[ipIndex[h.IP]] = h
 	}
 
-	s.state.mu.Lock()
+	s.state.Mu.Lock()
 	s.state.Hosts = sorted
 	s.state.Conflicts = conflicts
-	s.state.mu.Unlock()
+	s.state.Mu.Unlock()
 
 	// Send alerts for discovered hosts
 	if s.alertMgr != nil && len(sorted) > 0 {
@@ -652,10 +509,10 @@ func (s *Scanner) processARPResults(result *ARPResult) {
 }
 
 // processDHCPResults converts DHCPServerInfo to DHCPServerJSON
-func (s *Scanner) processDHCPResults(servers []DHCPServerInfo) {
-	var result []DHCPServerJSON
+func (s *Scanner) processDHCPResults(servers []models.DHCPServerInfo) {
+	var result []models.DHCPServerJSON
 	for _, srv := range servers {
-		entry := DHCPServerJSON{
+		entry := models.DHCPServerJSON{
 			LeaseTime: srv.LeaseTime,
 		}
 		if srv.ServerIP != nil {
@@ -682,9 +539,9 @@ func (s *Scanner) processDHCPResults(servers []DHCPServerInfo) {
 		result = append(result, entry)
 	}
 
-	s.state.mu.Lock()
+	s.state.Mu.Lock()
 	s.state.DHCPServers = result
-	s.state.mu.Unlock()
+	s.state.Mu.Unlock()
 
 	// Send alerts for detected DHCP servers
 	if s.alertMgr != nil && len(result) > 0 {
@@ -694,17 +551,17 @@ func (s *Scanner) processDHCPResults(servers []DHCPServerInfo) {
 
 // resolveHostnames resolves DNS PTR for all discovered hosts
 func (s *Scanner) resolveHostnames() {
-	s.state.mu.RLock()
-	hostsCopy := make([]HostEntry, len(s.state.Hosts))
+	s.state.Mu.RLock()
+	hostsCopy := make([]models.HostEntry, len(s.state.Hosts))
 	copy(hostsCopy, s.state.Hosts)
-	s.state.mu.RUnlock()
+	s.state.Mu.RUnlock()
 
 	var ips []string
 	for _, h := range hostsCopy {
 		ips = append(ips, h.IP)
 	}
 
-	entries := ResolveHostnames(ips)
+	entries := hostname.ResolveHostnames(ips)
 
 	// Build hostname map
 	s.hostnameMu.Lock()
@@ -714,7 +571,7 @@ func (s *Scanner) resolveHostnames() {
 	s.hostnameMu.Unlock()
 
 	// Update hosts and conflicts with hostnames
-	s.state.mu.Lock()
+	s.state.Mu.Lock()
 	s.hostnameMu.RLock()
 	for i := range s.state.Hosts {
 		if hn, ok := s.hostnameMap[s.state.Hosts[i].IP]; ok {
@@ -728,29 +585,29 @@ func (s *Scanner) resolveHostnames() {
 	}
 	s.hostnameMu.RUnlock()
 	s.state.Hostnames = entries
-	s.state.mu.Unlock()
+	s.state.Mu.Unlock()
 }
 
 // checkDNSSpoofing runs DNS spoofing verification
 func (s *Scanner) checkDNSSpoofing() {
-	s.state.mu.RLock()
+	s.state.Mu.RLock()
 	var dnsServers []string
 	for _, srv := range s.state.DHCPServers {
 		for _, dns := range srv.DNS {
 			dnsServers = append(dnsServers, dns)
 		}
 	}
-	s.state.mu.RUnlock()
+	s.state.Mu.RUnlock()
 
 	if len(dnsServers) == 0 {
 		return
 	}
 
-	alerts := CheckDNSSpoofing(dnsServers)
+	alerts := protocol.CheckDNSSpoofing(dnsServers)
 	if len(alerts) > 0 {
-		s.state.mu.Lock()
+		s.state.Mu.Lock()
 		s.state.DNSAlerts = append(s.state.DNSAlerts, alerts...)
-		s.state.mu.Unlock()
+		s.state.Mu.Unlock()
 
 		if s.alertMgr != nil {
 			go s.alertMgr.SendSecurityAlerts(nil, alerts)
@@ -779,21 +636,21 @@ func (s *Scanner) backgroundProtocolListeners() {
 		var wg sync.WaitGroup
 		wg.Add(4)
 
-		var newHSRP []HSRPEntry
-		var newVRRP []VRRPEntry
-		var newLLDP []LLDPNeighbor
-		var newCDP []CDPNeighbor
+		var newHSRP []models.HSRPEntry
+		var newVRRP []models.VRRPEntry
+		var newLLDP []models.LLDPNeighbor
+		var newCDP []models.CDPNeighbor
 		var protoMu sync.Mutex
 
 		go func() {
 			defer wg.Done()
-			entries, _ := ListenHSRP(s.iface.Name, 30*time.Second, s.bgStopCh)
+			entries, _ := protocol.ListenHSRP(s.iface.Name, 30*time.Second, s.bgStopCh)
 			if len(entries) > 0 {
-				s.state.mu.Lock()
+				s.state.Mu.Lock()
 				before := len(s.state.HSRPEntries)
 				s.state.HSRPEntries = deduplicateHSRP(append(s.state.HSRPEntries, entries...))
 				after := len(s.state.HSRPEntries)
-				s.state.mu.Unlock()
+				s.state.Mu.Unlock()
 				if after > before {
 					protoMu.Lock()
 					newHSRP = entries
@@ -804,13 +661,13 @@ func (s *Scanner) backgroundProtocolListeners() {
 
 		go func() {
 			defer wg.Done()
-			entries, _ := ListenVRRP(s.iface.Name, 30*time.Second, s.bgStopCh)
+			entries, _ := protocol.ListenVRRP(s.iface.Name, 30*time.Second, s.bgStopCh)
 			if len(entries) > 0 {
-				s.state.mu.Lock()
+				s.state.Mu.Lock()
 				before := len(s.state.VRRPEntries)
 				s.state.VRRPEntries = deduplicateVRRP(append(s.state.VRRPEntries, entries...))
 				after := len(s.state.VRRPEntries)
-				s.state.mu.Unlock()
+				s.state.Mu.Unlock()
 				if after > before {
 					protoMu.Lock()
 					newVRRP = entries
@@ -821,13 +678,13 @@ func (s *Scanner) backgroundProtocolListeners() {
 
 		go func() {
 			defer wg.Done()
-			entries, _ := ListenLLDP(s.iface.Name, 30*time.Second, s.bgStopCh)
+			entries, _ := protocol.ListenLLDP(s.iface.Name, 30*time.Second, s.bgStopCh)
 			if len(entries) > 0 {
-				s.state.mu.Lock()
+				s.state.Mu.Lock()
 				before := len(s.state.LLDPNeighbors)
 				s.state.LLDPNeighbors = deduplicateLLDP(append(s.state.LLDPNeighbors, entries...))
 				after := len(s.state.LLDPNeighbors)
-				s.state.mu.Unlock()
+				s.state.Mu.Unlock()
 				if after > before {
 					protoMu.Lock()
 					newLLDP = entries
@@ -838,13 +695,13 @@ func (s *Scanner) backgroundProtocolListeners() {
 
 		go func() {
 			defer wg.Done()
-			entries, _ := ListenCDP(s.iface.Name, 30*time.Second, s.bgStopCh)
+			entries, _ := protocol.ListenCDP(s.iface.Name, 30*time.Second, s.bgStopCh)
 			if len(entries) > 0 {
-				s.state.mu.Lock()
+				s.state.Mu.Lock()
 				before := len(s.state.CDPNeighbors)
 				s.state.CDPNeighbors = deduplicateCDP(append(s.state.CDPNeighbors, entries...))
 				after := len(s.state.CDPNeighbors)
-				s.state.mu.Unlock()
+				s.state.Mu.Unlock()
 				if after > before {
 					protoMu.Lock()
 					newCDP = entries
@@ -874,25 +731,25 @@ func (s *Scanner) backgroundARPMonitor() {
 
 	// Build baseline IP->MAC mapping (all known IPs, using all observed MACs)
 	baseline := make(map[string][]string)
-	s.arpResult.mu.Lock()
+	s.arpResult.Mu.Lock()
 	for ip, macs := range s.arpResult.Entries {
 		for _, m := range macs {
 			baseline[ip] = append(baseline[ip], m.String())
 		}
 	}
-	s.arpResult.mu.Unlock()
+	s.arpResult.Mu.Unlock()
 
 	// Find gateway IP (routing table first, then DHCP)
-	gatewayIP := getDefaultGateway()
+	gatewayIP := netutil.GetDefaultGateway()
 	if gatewayIP == "" {
-		s.state.mu.RLock()
+		s.state.Mu.RLock()
 		for _, srv := range s.state.DHCPServers {
 			if srv.Router != "" {
 				gatewayIP = srv.Router
 				break
 			}
 		}
-		s.state.mu.RUnlock()
+		s.state.Mu.RUnlock()
 	}
 
 	for {
@@ -902,15 +759,15 @@ func (s *Scanner) backgroundARPMonitor() {
 		default:
 		}
 
-		alerts, err := MonitorARP(s.iface.Name, baseline, gatewayIP, 5*time.Second, s.bgStopCh)
+		alerts, err := protocol.MonitorARP(s.iface.Name, baseline, gatewayIP, 5*time.Second, s.bgStopCh)
 		if err != nil {
 			log.Printf("ARP 모니터 오류: %v", err)
 			continue
 		}
 		if len(alerts) > 0 {
-			var newConflicts []ConflictEntry
-			var newARPAlerts []ARPSpoofAlert
-			s.state.mu.Lock()
+			var newConflicts []models.ConflictEntry
+			var newARPAlerts []models.ARPSpoofAlert
+			s.state.Mu.Lock()
 			for _, a := range alerts {
 				key := a.IP + ":" + a.NewMAC
 				merged := false
@@ -926,7 +783,7 @@ func (s *Scanner) backgroundARPMonitor() {
 				if !merged {
 					a.Subnet = s.findSubnet(net.ParseIP(a.IP))
 					s.state.ARPAlerts = append(s.state.ARPAlerts, a)
-					newConflicts = append(newConflicts, ConflictEntry{
+					newConflicts = append(newConflicts, models.ConflictEntry{
 						IP:     a.IP,
 						MACs:   []string{a.OldMAC, a.NewMAC},
 						Subnet: a.Subnet,
@@ -937,7 +794,7 @@ func (s *Scanner) backgroundARPMonitor() {
 					}
 				}
 			}
-			s.state.mu.Unlock()
+			s.state.Mu.Unlock()
 			if s.alertMgr != nil && len(newConflicts) > 0 {
 				go s.alertMgr.SendConflictAlerts(newConflicts)
 			}
@@ -949,17 +806,17 @@ func (s *Scanner) backgroundARPMonitor() {
 }
 
 // Deduplication helpers
-func deduplicateHSRP(entries []HSRPEntry) []HSRPEntry {
+func deduplicateHSRP(entries []models.HSRPEntry) []models.HSRPEntry {
 	seen := make(map[string]int)
 	for i, e := range entries {
 		key := fmt.Sprintf("%d-%d-%s", e.Version, e.Group, e.SourceIP)
 		if idx, ok := seen[key]; ok {
-			entries[idx] = e // Update with newer entry
+			entries[idx] = e
 		} else {
 			seen[key] = i
 		}
 	}
-	var result []HSRPEntry
+	var result []models.HSRPEntry
 	added := make(map[string]bool)
 	for _, e := range entries {
 		key := fmt.Sprintf("%d-%d-%s", e.Version, e.Group, e.SourceIP)
@@ -971,7 +828,7 @@ func deduplicateHSRP(entries []HSRPEntry) []HSRPEntry {
 	return result
 }
 
-func deduplicateVRRP(entries []VRRPEntry) []VRRPEntry {
+func deduplicateVRRP(entries []models.VRRPEntry) []models.VRRPEntry {
 	seen := make(map[string]int)
 	for i, e := range entries {
 		key := fmt.Sprintf("%d-%s", e.RouterID, e.SourceIP)
@@ -981,7 +838,7 @@ func deduplicateVRRP(entries []VRRPEntry) []VRRPEntry {
 			seen[key] = i
 		}
 	}
-	var result []VRRPEntry
+	var result []models.VRRPEntry
 	added := make(map[string]bool)
 	for _, e := range entries {
 		key := fmt.Sprintf("%d-%s", e.RouterID, e.SourceIP)
@@ -993,7 +850,7 @@ func deduplicateVRRP(entries []VRRPEntry) []VRRPEntry {
 	return result
 }
 
-func deduplicateLLDP(entries []LLDPNeighbor) []LLDPNeighbor {
+func deduplicateLLDP(entries []models.LLDPNeighbor) []models.LLDPNeighbor {
 	seen := make(map[string]int)
 	for i, e := range entries {
 		key := e.ChassisID + "-" + e.PortID
@@ -1003,7 +860,7 @@ func deduplicateLLDP(entries []LLDPNeighbor) []LLDPNeighbor {
 			seen[key] = i
 		}
 	}
-	var result []LLDPNeighbor
+	var result []models.LLDPNeighbor
 	added := make(map[string]bool)
 	for _, e := range entries {
 		key := e.ChassisID + "-" + e.PortID
@@ -1015,7 +872,7 @@ func deduplicateLLDP(entries []LLDPNeighbor) []LLDPNeighbor {
 	return result
 }
 
-func deduplicateCDP(entries []CDPNeighbor) []CDPNeighbor {
+func deduplicateCDP(entries []models.CDPNeighbor) []models.CDPNeighbor {
 	seen := make(map[string]int)
 	for i, e := range entries {
 		key := e.DeviceID + "-" + e.PortID
@@ -1025,7 +882,7 @@ func deduplicateCDP(entries []CDPNeighbor) []CDPNeighbor {
 			seen[key] = i
 		}
 	}
-	var result []CDPNeighbor
+	var result []models.CDPNeighbor
 	added := make(map[string]bool)
 	for _, e := range entries {
 		key := e.DeviceID + "-" + e.PortID

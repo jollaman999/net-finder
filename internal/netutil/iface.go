@@ -1,4 +1,4 @@
-package main
+package netutil
 
 import (
 	"bufio"
@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-func getInterface(name string) (*net.Interface, error) {
+func GetInterface(name string) (*net.Interface, error) {
 	if name != "" {
 		return net.InterfaceByName(name)
 	}
@@ -45,7 +45,7 @@ func getInterface(name string) (*net.Interface, error) {
 	return nil, fmt.Errorf("적합한 네트워크 인터페이스를 찾을 수 없습니다")
 }
 
-func getInterfaceAddr(iface *net.Interface) (net.IP, net.HardwareAddr, error) {
+func GetInterfaceAddr(iface *net.Interface) (net.IP, net.HardwareAddr, error) {
 	addrs, err := iface.Addrs()
 	if err != nil {
 		return nil, nil, err
@@ -60,7 +60,7 @@ func getInterfaceAddr(iface *net.Interface) (net.IP, net.HardwareAddr, error) {
 	return nil, nil, fmt.Errorf("IPv4 주소를 찾을 수 없습니다")
 }
 
-func parseSubnets(subnetStr string, iface *net.Interface) []*net.IPNet {
+func ParseSubnets(subnetStr string, iface *net.Interface) []*net.IPNet {
 	var subnets []*net.IPNet
 
 	if subnetStr != "" {
@@ -93,7 +93,7 @@ func parseSubnets(subnetStr string, iface *net.Interface) []*net.IPNet {
 	return subnets
 }
 
-func expandCIDR(ipnet *net.IPNet) []net.IP {
+func ExpandCIDR(ipnet *net.IPNet) []net.IP {
 	ones, bits := ipnet.Mask.Size()
 	hostBits := bits - ones
 
@@ -118,7 +118,7 @@ func expandCIDR(ipnet *net.IPNet) []net.IP {
 	return ips
 }
 
-func groupMACsByDevice(macs []net.HardwareAddr) [][]net.HardwareAddr {
+func GroupMACsByDevice(macs []net.HardwareAddr) [][]net.HardwareAddr {
 	if len(macs) == 0 {
 		return nil
 	}
@@ -156,8 +156,8 @@ func groupMACsByDevice(macs []net.HardwareAddr) [][]net.HardwareAddr {
 	return groups
 }
 
-// getDefaultGateway reads the default gateway from /proc/net/route
-func getDefaultGateway() string {
+// GetDefaultGateway reads the default gateway from /proc/net/route
+func GetDefaultGateway() string {
 	f, err := os.Open("/proc/net/route")
 	if err != nil {
 		return ""
@@ -184,7 +184,7 @@ func getDefaultGateway() string {
 	return ""
 }
 
-func sortIPStrings(ips []string) {
+func SortIPStrings(ips []string) {
 	sort.Slice(ips, func(i, j int) bool {
 		a := net.ParseIP(ips[i]).To4()
 		b := net.ParseIP(ips[j]).To4()
@@ -195,7 +195,7 @@ func sortIPStrings(ips []string) {
 	})
 }
 
-func sortCIDRStrings(cidrs []string) {
+func SortCIDRStrings(cidrs []string) {
 	sort.Slice(cidrs, func(i, j int) bool {
 		_, netA, errA := net.ParseCIDR(cidrs[i])
 		_, netB, errB := net.ParseCIDR(cidrs[j])
