@@ -1332,6 +1332,11 @@ function initLanguage() {
   const saved = localStorage.getItem('lang');
   if (saved && i18n[saved]) {
     currentLang = saved;
+  } else {
+    const browserLang = (navigator.language || '').split('-')[0].toLowerCase();
+    if (i18n[browserLang]) {
+      currentLang = browserLang;
+    }
   }
   document.getElementById('langSelect').value = currentLang;
   applyLanguage();
