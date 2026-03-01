@@ -81,6 +81,7 @@ header h1 span { color: var(--primary); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-primary { background: var(--primary); color: #fff; }
 .btn-danger { background: var(--danger); color: #fff; }
+.btn-warning { background: var(--warning); color: #fff; }
 .lang-select {
   padding: 4px 8px;
   border: 1px solid var(--border);
@@ -455,7 +456,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
   <div class="header-controls">
     <button id="btnScan" class="btn btn-primary" onclick="startScan()" data-i18n="btn_scan">Start Scan</button>
     <button id="btnStop" class="btn btn-danger" onclick="stopScan()" disabled data-i18n="btn_stop">Stop Scan</button>
-    <button class="btn" onclick="openAlertModal()" data-i18n="btn_alert_config">Alert Settings</button>
+    <button class="btn btn-warning" onclick="openAlertModal()" data-i18n="btn_alert_config">Alert Settings</button>
     <select id="langSelect" class="lang-select" onchange="setLanguage(this.value)">
       <option value="en">EN</option>
       <option value="ko">KO</option>
