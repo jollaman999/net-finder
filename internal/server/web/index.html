@@ -915,7 +915,7 @@ const i18n = {
     alert_event_arp: 'ARP Spoofing',
     alert_event_dns: 'DNS Spoofing',
     alert_event_ndp: 'NDP Spoofing',
-    alert_event_dhcpv6: 'DHCPv6 Servers',
+    alert_event_dhcpv6: 'DHCPv6 Server Discovery',
     alert_required_fields: 'From, Recipient and SMTP Host are required',
     alert_test_ok: 'Test alert sent successfully',
     alert_test_fail: 'Test failed: {0}',
@@ -1040,7 +1040,7 @@ const i18n = {
     alert_event_arp: 'ARP 스푸핑',
     alert_event_dns: 'DNS 스푸핑',
     alert_event_ndp: 'NDP 스푸핑',
-    alert_event_dhcpv6: 'DHCPv6 서버',
+    alert_event_dhcpv6: 'DHCPv6 서버 발견',
     alert_required_fields: '보내는 주소, 수신자, SMTP 호스트는 필수 항목입니다',
     alert_test_ok: '테스트 알림 발송 성공',
     alert_test_fail: '테스트 실패: {0}',
@@ -1165,7 +1165,7 @@ const i18n = {
     alert_event_arp: 'ARPスプーフィング',
     alert_event_dns: 'DNSスプーフィング',
     alert_event_ndp: 'NDPスプーフィング',
-    alert_event_dhcpv6: 'DHCPv6サーバー',
+    alert_event_dhcpv6: 'DHCPv6サーバー検出',
     alert_required_fields: '送信元、宛先、SMTPホストは必須項目です',
     alert_test_ok: 'テストアラート送信成功',
     alert_test_fail: 'テスト失敗: {0}',
@@ -1290,7 +1290,7 @@ const i18n = {
     alert_event_arp: 'ARP欺骗',
     alert_event_dns: 'DNS欺骗',
     alert_event_ndp: 'NDP欺骗',
-    alert_event_dhcpv6: 'DHCPv6服务器',
+    alert_event_dhcpv6: 'DHCPv6服务器发现',
     alert_required_fields: '发件人、收件人和SMTP主机为必填项',
     alert_test_ok: '测试告警发送成功',
     alert_test_fail: '测试失败: {0}',
@@ -2098,7 +2098,7 @@ function updateAlertSubnetAllFor(ver) {
 }
 
 const alertEventKeysV4 = ['hosts', 'conflicts', 'dhcp', 'hsrp_vrrp', 'lldp_cdp', 'arp_spoofing', 'dns_spoofing'];
-const alertEventKeysV6 = ['hosts', 'conflicts', 'dhcpv6', 'hsrp_vrrp', 'lldp_cdp', 'ndp_spoofing'];
+const alertEventKeysV6 = ['hosts', 'conflicts', 'dhcpv6', 'hsrp_vrrp', 'lldp_cdp', 'ndp_spoofing', 'dns_spoofing'];
 
 const alertEventI18n = { hosts:'alert_event_hosts', conflicts:'alert_event_conflicts', dhcp:'alert_event_dhcp', dhcpv6:'alert_event_dhcpv6', hsrp_vrrp:'alert_event_hsrp_vrrp', lldp_cdp:'alert_event_lldp_cdp', arp_spoofing:'alert_event_arp', dns_spoofing:'alert_event_dns', ndp_spoofing:'alert_event_ndp' };
 

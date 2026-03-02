@@ -124,7 +124,7 @@ func (am *AlertManager) load() {
 	}
 	eventsV6Set := map[string]bool{
 		"hosts": true, "conflicts": true, "dhcpv6": true,
-		"hsrp_vrrp": true, "lldp_cdp": true, "ndp_spoofing": true,
+		"hsrp_vrrp": true, "lldp_cdp": true, "dns_spoofing": true, "ndp_spoofing": true,
 	}
 	for i := range configs {
 		if len(configs[i].Subnets) > 0 {
@@ -346,7 +346,7 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 		}
 	}
 
-	if hasEventV4(cfg, "arp_spoofing") || hasEventV4(cfg, "dns_spoofing") {
+	if hasEventV4(cfg, "arp_spoofing") || hasEventV4(cfg, "dns_spoofing") || hasEventV6(cfg, "dns_spoofing") {
 		var arpAlerts []models.ARPSpoofAlert
 		var dnsAlerts []models.DNSSpoofAlert
 		if hasEventV4(cfg, "arp_spoofing") {
@@ -354,7 +354,7 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 				{IP: "192.168.1.1", OldMAC: "AA:BB:CC:DD:EE:01", NewMAC: "FF:FF:FF:00:11:22", AlertType: "gateway_mac_change", Severity: "critical", Message: "Gateway 192.168.1.1 MAC changed", Count: 5, FirstSeen: time.Now().Add(-2 * time.Minute).Format("15:04:05"), Timestamp: time.Now().Format("15:04:05"), Subnet: "192.168.1.0/24"},
 			}
 		}
-		if hasEventV4(cfg, "dns_spoofing") {
+		if hasEventV4(cfg, "dns_spoofing") || hasEventV6(cfg, "dns_spoofing") {
 			dnsAlerts = []models.DNSSpoofAlert{
 				{Domain: "example.com", Server1: "8.8.8.8", Response1: "93.184.216.34", Server2: "192.168.1.1", Response2: "10.0.0.99", AlertType: "dns_mismatch", Severity: "critical", Message: "DNS response mismatch for example.com", Timestamp: time.Now().Format("15:04:05")},
 			}
@@ -636,7 +636,7 @@ func (am *AlertManager) SendSecurityAlerts(arpAlerts []models.ARPSpoofAlert, dns
 
 		// Filter DNS alerts by event
 		var filteredDNS []models.DNSSpoofAlert
-		if hasEventV4(cfg, "dns_spoofing") {
+		if hasEventV4(cfg, "dns_spoofing") || hasEventV6(cfg, "dns_spoofing") {
 			filteredDNS = dnsAlerts
 		}
 
