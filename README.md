@@ -2,14 +2,16 @@
 
 [한국어 문서](docs/README.ko.md)
 
-A real-time network scanner and monitoring dashboard with a built-in web UI. Net Finder discovers hosts on your local network, detects network infrastructure, and monitors for security threats — all from a single static binary.
+A real-time network scanner and monitoring dashboard with a built-in web UI. Net Finder discovers hosts on your local network using both IPv4 and IPv6, detects network infrastructure, and monitors for security threats — all from a single static binary.
 
 ## Features
 
-- **ARP-based host discovery** — Scans subnets using ARP requests and passively captures ARP traffic to discover all active hosts
-- **IP conflict detection** — Identifies multiple MAC addresses claiming the same IP, distinguishing real conflicts from NIC bonding/teaming
-- **DHCP server detection** — Discovers DHCP servers on the network and reports offered IPs, subnet masks, routers, and DNS servers
-- **Hostname resolution** — Resolves hostnames via DNS PTR, NetBIOS, mDNS, SNMP sysName, TLS certificates, and SMTP banners
+- **IPv4 & IPv6 dual-stack support** — Scan IPv4-only, IPv6-only, or both simultaneously with the `-mode` flag
+- **ARP-based host discovery** — Scans subnets using ARP requests and passively captures ARP traffic to discover all active IPv4 hosts
+- **NDP-based host discovery** — Discovers IPv6 hosts via Neighbor Discovery Protocol multicast solicitations
+- **IP conflict detection** — Identifies multiple MAC addresses claiming the same IP (both IPv4 and IPv6), distinguishing real conflicts from NIC bonding/teaming
+- **DHCP/DHCPv6 server detection** — Discovers DHCP and DHCPv6 servers on the network and reports offered IPs, subnet masks, routers, and DNS servers
+- **Hostname resolution** — Resolves hostnames via DNS PTR, NetBIOS, mDNS, SNMP sysName, TLS certificates, and SMTP banners. In IPv6-only mode, uses internal ARP to share hostnames via MAC address matching
 - **OUI vendor lookup** — Maps MAC addresses to hardware vendors using the IEEE OUI database
 - **Network protocol listeners**
   - **HSRP** (Hot Standby Router Protocol) — Detects Cisco HSRP v1/v2 advertisements
@@ -18,8 +20,10 @@ A real-time network scanner and monitoring dashboard with a built-in web UI. Net
   - **CDP** (Cisco Discovery Protocol) — Discovers Cisco devices and their details
 - **Security monitoring**
   - **ARP spoofing detection** — Continuously monitors ARP traffic against a baseline, with critical alerts for gateway spoofing
+  - **NDP spoofing detection** — Monitors IPv6 NDP traffic for suspicious neighbor advertisements
   - **DNS spoofing detection** — Compares responses from multiple DNS servers to detect mismatches and suspiciously fast responses
-- **Web dashboard** — Single-page web UI with real-time scan progress, host lists, conflict alerts, and protocol information
+- **Email alerts** — Configurable per-subnet email alerts with separate IPv4/IPv6 event selection, encrypted config storage (AES-256-GCM)
+- **Web dashboard** — Single-page web UI with real-time scan progress, host lists, conflict alerts, protocol information, and multi-language support (English, Korean, Japanese, Chinese)
 
 ## Requirements
 
@@ -90,6 +94,7 @@ sudo ./net-finder [options]
 | `-s` | (auto-discover) | Subnets to scan (comma-separated CIDR, e.g. `192.168.1.0/24,10.0.0.0/24`) |
 | `-p` | `9090` | Web dashboard port |
 | `-auto` | `true` | Start scanning automatically on launch |
+| `-mode` | `both` | IP version mode: `ipv4`, `ipv6`, or `both` |
 
 ### Examples
 
@@ -103,6 +108,12 @@ sudo ./net-finder -i eth0 -s 192.168.1.0/24
 # Scan multiple subnets on a custom port
 sudo ./net-finder -s 192.168.1.0/24,10.0.0.0/24 -p 8080
 
+# IPv6-only scan
+sudo ./net-finder -mode ipv6
+
+# IPv4-only scan
+sudo ./net-finder -mode ipv4
+
 # Start without auto-scan (manual trigger from the web UI)
 sudo ./net-finder -auto=false
 ```
@@ -112,13 +123,14 @@ The web dashboard opens automatically at `http://localhost:9090` (or your chosen
 ## How It Works
 
 1. **OUI database load** — Downloads and caches the IEEE OUI vendor database
-2. **Parallel scanning** — Runs all discovery phases concurrently:
-   - ARP scan across all target subnets, followed by hostname resolution
-   - DHCP server detection, followed by DNS spoofing checks
+2. **Parallel scanning** — Runs all discovery phases concurrently (based on `-mode`):
+   - ARP scan across IPv4 subnets and/or NDP scan across IPv6 subnets, followed by hostname resolution
+   - DHCP/DHCPv6 server detection, followed by DNS spoofing checks
    - Protocol listeners for HSRP, VRRP, LLDP, and CDP (30-second capture windows)
 3. **Background monitoring** — After the initial scan completes, continuously listens for:
    - New HSRP/VRRP/LLDP/CDP advertisements
-   - ARP traffic anomalies indicating potential spoofing
+   - ARP traffic anomalies indicating potential spoofing (IPv4)
+   - NDP traffic anomalies indicating potential spoofing (IPv6)
 
 Packet capture uses Linux `AF_PACKET` raw sockets with kernel-level BPF filters, bypassing the need for libpcap. Packet parsing is handled by `gopacket/layers` (pure Go).
 
@@ -132,14 +144,19 @@ Packet capture uses Linux `AF_PACKET` raw sockets with kernel-level BPF filters,
 | `/api/hosts` | GET | Discovered hosts |
 | `/api/conflicts` | GET | IP address conflicts |
 | `/api/dhcp` | GET | Detected DHCP servers |
+| `/api/dhcpv6` | GET | Detected DHCPv6 servers |
 | `/api/hsrp` | GET | HSRP advertisements |
 | `/api/vrrp` | GET | VRRP advertisements |
 | `/api/lldp` | GET | LLDP neighbors |
 | `/api/cdp` | GET | CDP neighbors |
 | `/api/hostnames` | GET | Resolved hostnames |
 | `/api/security/arp` | GET | ARP spoofing alerts |
+| `/api/security/ndp` | GET | NDP spoofing alerts |
 | `/api/security/dns` | GET | DNS spoofing alerts |
+| `/api/mode` | GET | Current IP version mode |
 | `/api/interfaces` | GET | Available network interfaces |
+| `/api/alerts` | GET/POST/DELETE | Manage email alert configurations |
+| `/api/alerts/test` | POST | Send a test alert email |
 
 ## License
 
