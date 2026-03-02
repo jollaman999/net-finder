@@ -123,7 +123,8 @@ func (am *AlertManager) load() {
 		"hsrp_vrrp": true, "lldp_cdp": true, "arp_spoofing": true, "dns_spoofing": true,
 	}
 	eventsV6Set := map[string]bool{
-		"hosts": true, "conflicts": true, "dhcpv6": true, "ndp_spoofing": true,
+		"hosts": true, "conflicts": true, "dhcpv6": true,
+		"hsrp_vrrp": true, "lldp_cdp": true, "ndp_spoofing": true,
 	}
 	for i := range configs {
 		if len(configs[i].Subnets) > 0 {
@@ -313,7 +314,7 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 		}
 	}
 
-	if hasEventV4(cfg, "hsrp_vrrp") {
+	if hasEventV4(cfg, "hsrp_vrrp") || hasEventV6(cfg, "hsrp_vrrp") {
 		testHSRP := []models.HSRPEntry{
 			{Version: 2, Group: 1, Priority: 110, State: "Active", VirtualIP: "192.168.1.254", HelloTime: 3, HoldTime: 10, SourceIP: "192.168.1.2", SourceMAC: "00:00:0C:9F:F0:01", Timestamp: time.Now().Format("15:04:05")},
 		}
@@ -329,7 +330,7 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 		}
 	}
 
-	if hasEventV4(cfg, "lldp_cdp") {
+	if hasEventV4(cfg, "lldp_cdp") || hasEventV6(cfg, "lldp_cdp") {
 		testLLDP := []models.LLDPNeighbor{
 			{ChassisID: "AA:BB:CC:DD:EE:01", PortID: "Gi0/1", SysName: "switch01.local", SysDesc: "Cisco IOS", MgmtAddr: "192.168.1.2", TTL: 120, SourceMAC: "AA:BB:CC:DD:EE:01", Timestamp: time.Now().Format("15:04:05")},
 		}
@@ -734,7 +735,7 @@ func (am *AlertManager) SendProtocolAlerts(hsrp []models.HSRPEntry, vrrp []model
 	}
 
 	for _, cfg := range configs {
-		if !hasEventV4(cfg, "hsrp_vrrp") {
+		if !hasEventV4(cfg, "hsrp_vrrp") && !hasEventV6(cfg, "hsrp_vrrp") {
 			continue
 		}
 		var parts []string
@@ -767,7 +768,7 @@ func (am *AlertManager) SendDiscoveryAlerts(lldp []models.LLDPNeighbor, cdp []mo
 	}
 
 	for _, cfg := range configs {
-		if !hasEventV4(cfg, "lldp_cdp") {
+		if !hasEventV4(cfg, "lldp_cdp") && !hasEventV6(cfg, "lldp_cdp") {
 			continue
 		}
 		var parts []string
