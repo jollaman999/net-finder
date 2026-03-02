@@ -33,11 +33,11 @@ type AlertManager struct {
 func alertConfigDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("홈 디렉토리 확인 실패: %v", err)
+		return "", fmt.Errorf("failed to get home directory: %v", err)
 	}
 	dir := filepath.Join(home, ".config", "net-finder")
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", fmt.Errorf("설정 디렉토리 생성 실패: %v", err)
+		return "", fmt.Errorf("failed to create config directory: %v", err)
 	}
 	return dir, nil
 }
@@ -57,7 +57,7 @@ func deriveKey() [32]byte {
 func NewAlertManager() *AlertManager {
 	dir, err := alertConfigDir()
 	if err != nil {
-		log.Printf("알림 설정 경로 오류: %v", err)
+		log.Printf("alert config path error: %v", err)
 		dir = "."
 	}
 	am := &AlertManager{
@@ -108,12 +108,12 @@ func (am *AlertManager) load() {
 	}
 	plaintext, err := am.decrypt(data)
 	if err != nil {
-		log.Printf("알림 설정 복호화 실패: %v", err)
+		log.Printf("failed to decrypt alert config: %v", err)
 		return
 	}
 	var configs []models.AlertConfig
 	if err := json.Unmarshal(plaintext, &configs); err != nil {
-		log.Printf("알림 설정 파싱 실패: %v", err)
+		log.Printf("failed to parse alert config: %v", err)
 		return
 	}
 	// Migrate old Subnets/Events fields to V4/V6
@@ -154,24 +154,24 @@ func (am *AlertManager) load() {
 	am.configs = configs
 	if migrated {
 		am.save()
-		log.Printf("알림 설정 마이그레이션 완료")
+		log.Printf("alert config migration complete")
 	}
-	log.Printf("알림 설정 %d건 로드: %s", len(configs), am.filePath)
+	log.Printf("loaded %d alert config(s): %s", len(configs), am.filePath)
 }
 
 func (am *AlertManager) save() {
 	plaintext, err := json.Marshal(am.configs)
 	if err != nil {
-		log.Printf("알림 설정 직렬화 실패: %v", err)
+		log.Printf("failed to serialize alert config: %v", err)
 		return
 	}
 	ciphertext, err := am.encrypt(plaintext)
 	if err != nil {
-		log.Printf("알림 설정 암호화 실패: %v", err)
+		log.Printf("failed to encrypt alert config: %v", err)
 		return
 	}
 	if err := os.WriteFile(am.filePath, ciphertext, 0600); err != nil {
-		log.Printf("알림 설정 파일 저장 실패: %v", err)
+		log.Printf("failed to save alert config file: %v", err)
 	}
 }
 
@@ -260,7 +260,7 @@ func (am *AlertManager) SendConflictAlerts(conflicts []models.ConflictEntry) {
 			subject := fmt.Sprintf("[Net Finder] IP Conflict — %s (%d)", subnet, len(entries))
 			body := buildHTMLReport(subnet, entries)
 			if err := sendEmailHTML(cfg, subject, body); err != nil {
-				log.Printf("알림 발송 실패 [%s] %s: %v", cfg.ID, subnet, err)
+				log.Printf("alert send failed [%s] %s: %v", cfg.ID, subnet, err)
 			}
 		}
 	}
@@ -646,7 +646,7 @@ func (am *AlertManager) SendSecurityAlerts(arpAlerts []models.ARPSpoofAlert, dns
 		subject := buildSecuritySubject(filteredARP, filteredDNS)
 		body := buildSecurityHTMLReport(filteredARP, filteredDNS)
 		if err := sendEmailHTML(cfg, subject, body); err != nil {
-			log.Printf("보안 알림 발송 실패 [%s]: %v", cfg.ID, err)
+			log.Printf("security alert send failed [%s]: %v", cfg.ID, err)
 		}
 	}
 }
@@ -687,7 +687,7 @@ func (am *AlertManager) SendHostAlerts(hosts []models.HostEntry) {
 			subject := fmt.Sprintf("[Net Finder] Host Discovery — %s (%d hosts)", subnet, len(entries))
 			body := buildHostHTMLReport(subnet, entries)
 			if err := sendEmailHTML(cfg, subject, body); err != nil {
-				log.Printf("호스트 알림 발송 실패 [%s] %s: %v", cfg.ID, subnet, err)
+				log.Printf("host alert send failed [%s] %s: %v", cfg.ID, subnet, err)
 			}
 		}
 	}
@@ -714,7 +714,7 @@ func (am *AlertManager) SendDHCPAlerts(servers []models.DHCPServerJSON) {
 		subject := fmt.Sprintf("[Net Finder] DHCP Servers Detected (%d)", len(servers))
 		body := buildDHCPHTMLReport(servers)
 		if err := sendEmailHTML(cfg, subject, body); err != nil {
-			log.Printf("DHCP 알림 발송 실패 [%s]: %v", cfg.ID, err)
+			log.Printf("DHCP alert send failed [%s]: %v", cfg.ID, err)
 		}
 	}
 }
@@ -747,7 +747,7 @@ func (am *AlertManager) SendProtocolAlerts(hsrp []models.HSRPEntry, vrrp []model
 		subject := fmt.Sprintf("[Net Finder] %s Detected", strings.Join(parts, " / "))
 		body := buildProtocolHTMLReport(hsrp, vrrp)
 		if err := sendEmailHTML(cfg, subject, body); err != nil {
-			log.Printf("프로토콜 알림 발송 실패 [%s]: %v", cfg.ID, err)
+			log.Printf("protocol alert send failed [%s]: %v", cfg.ID, err)
 		}
 	}
 }
@@ -780,7 +780,7 @@ func (am *AlertManager) SendDiscoveryAlerts(lldp []models.LLDPNeighbor, cdp []mo
 		subject := fmt.Sprintf("[Net Finder] %s Neighbors Detected", strings.Join(parts, " / "))
 		body := buildDiscoveryHTMLReport(lldp, cdp)
 		if err := sendEmailHTML(cfg, subject, body); err != nil {
-			log.Printf("디스커버리 알림 발송 실패 [%s]: %v", cfg.ID, err)
+			log.Printf("discovery alert send failed [%s]: %v", cfg.ID, err)
 		}
 	}
 }
@@ -806,7 +806,7 @@ func (am *AlertManager) SendNDPAlerts(alerts []models.NDPSpoofAlert) {
 		subject := fmt.Sprintf("[Net Finder] NDP Spoofing Alert (%d)", len(alerts))
 		body := buildNDPSecurityHTMLReport(alerts)
 		if err := sendEmailHTML(cfg, subject, body); err != nil {
-			log.Printf("NDP 보안 알림 발송 실패 [%s]: %v", cfg.ID, err)
+			log.Printf("NDP security alert send failed [%s]: %v", cfg.ID, err)
 		}
 	}
 }
@@ -832,7 +832,7 @@ func (am *AlertManager) SendDHCPv6Alerts(servers []models.DHCPv6ServerJSON) {
 		subject := fmt.Sprintf("[Net Finder] DHCPv6 Servers Detected (%d)", len(servers))
 		body := buildDHCPv6HTMLReport(servers)
 		if err := sendEmailHTML(cfg, subject, body); err != nil {
-			log.Printf("DHCPv6 알림 발송 실패 [%s]: %v", cfg.ID, err)
+			log.Printf("DHCPv6 alert send failed [%s]: %v", cfg.ID, err)
 		}
 	}
 }

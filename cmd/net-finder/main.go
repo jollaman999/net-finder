@@ -22,11 +22,11 @@ import (
 var version string
 
 func main() {
-	ifaceName := flag.String("i", "", "네트워크 인터페이스 (미지정시 자동 감지)")
-	subnetStr := flag.String("s", "", "스캔할 서브넷 (콤마 구분, 예: 192.168.1.0/24,10.0.0.0/24)")
-	port := flag.Int("p", 9090, "웹 서버 포트")
-	autoScan := flag.Bool("auto", true, "시작 시 자동 스캔")
-	ipModeStr := flag.String("mode", "both", "IP 버전: ipv4, ipv6, both")
+	ifaceName := flag.String("i", "", "network interface (auto-detect if not specified)")
+	subnetStr := flag.String("s", "", "subnets to scan (comma-separated, e.g. 192.168.1.0/24,10.0.0.0/24)")
+	port := flag.Int("p", 9090, "web server port")
+	autoScan := flag.Bool("auto", true, "auto scan on start")
+	ipModeStr := flag.String("mode", "both", "IP version: ipv4, ipv6, both")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Net Finder\n\n")
@@ -43,7 +43,7 @@ func main() {
 	flag.Parse()
 
 	if os.Getuid() != 0 {
-		fmt.Fprintf(os.Stderr, "이 프로그램은 root 권한이 필요합니다. sudo로 실행해주세요.\n")
+		fmt.Fprintf(os.Stderr, "This program requires root privileges. Please run with sudo.\n")
 		os.Exit(1)
 	}
 
@@ -52,7 +52,7 @@ func main() {
 	// Get network interface
 	iface, err := netutil.GetInterfaceForMode(*ifaceName, mode)
 	if err != nil {
-		log.Fatalf("인터페이스 감지 실패: %v", err)
+		log.Fatalf("Failed to detect interface: %v", err)
 	}
 
 	var localIP net.IP
@@ -64,9 +64,9 @@ func main() {
 		localIP, localMAC, err = netutil.GetInterfaceAddr(iface)
 		if err != nil {
 			if mode == models.IPModeIPv4 {
-				log.Fatalf("인터페이스 주소 가져오기 실패: %v", err)
+				log.Fatalf("Failed to get interface address: %v", err)
 			}
-			log.Printf("IPv4 주소 없음 (IPv6 전용으로 진행): %v", err)
+			log.Printf("No IPv4 address (proceeding with IPv6 only): %v", err)
 		} else {
 			if *subnetStr != "" {
 				subnets = netutil.ParseSubnets(*subnetStr, iface)
@@ -99,9 +99,9 @@ func main() {
 		globalIP, llIP, _, err := netutil.GetInterfaceAddrV6(iface)
 		if err != nil {
 			if mode == models.IPModeIPv6 {
-				log.Fatalf("IPv6 주소 가져오기 실패: %v", err)
+				log.Fatalf("Failed to get IPv6 address: %v", err)
 			}
-			log.Printf("IPv6 주소 없음 (IPv4 전용으로 진행): %v", err)
+			log.Printf("No IPv6 address (proceeding with IPv4 only): %v", err)
 		} else {
 			localIPv6 = globalIP
 			linkLocalIPv6 = llIP
@@ -110,7 +110,7 @@ func main() {
 	}
 
 	if len(subnets) == 0 && len(subnetsV6) == 0 {
-		log.Fatal("스캔할 서브넷이 없습니다. -s 옵션으로 서브넷을 지정해주세요.")
+		log.Fatal("No subnets to scan. Use -s option to specify subnets.")
 	}
 
 	var subnetStrs []string
@@ -121,8 +121,8 @@ func main() {
 		subnetStrs = append(subnetStrs, s.String())
 	}
 
-	log.Printf("모드: %s", mode)
-	log.Printf("인터페이스: %s (MAC: %s)", iface.Name, localMAC)
+	log.Printf("Mode: %s", mode)
+	log.Printf("Interface: %s (MAC: %s)", iface.Name, localMAC)
 	if localIP != nil {
 		log.Printf("IPv4: %s", localIP)
 	}
@@ -130,16 +130,16 @@ func main() {
 		log.Printf("IPv6: %s", localIPv6)
 	}
 	if linkLocalIPv6 != nil {
-		log.Printf("IPv6 링크 로컬: %s", linkLocalIPv6)
+		log.Printf("IPv6 link-local: %s", linkLocalIPv6)
 	}
-	log.Printf("서브넷: %s", strings.Join(subnetStrs, ", "))
+	log.Printf("Subnets: %s", strings.Join(subnetStrs, ", "))
 
 	// Initialize alert manager and scanner
 	alertMgr := alert.NewAlertManager()
 	sc := scanner.NewScanner(iface, localIP, localIPv6, linkLocalIPv6, localMAC, subnets, subnetsV6, mode, alertMgr)
 
 	if *autoScan {
-		log.Println("자동 스캔 시작...")
+		log.Println("Auto scan starting...")
 		sc.Start()
 	}
 
@@ -150,9 +150,9 @@ func main() {
 		openBrowser(addr)
 	}()
 
-	log.Printf("웹 서버 시작: %s", addr)
+	log.Printf("Web server starting: %s", addr)
 	if err := server.StartWebServer(*port, sc, alertMgr, iface.Name); err != nil {
-		log.Fatalf("웹 서버 실패: %v", err)
+		log.Fatalf("Web server failed: %v", err)
 	}
 }
 

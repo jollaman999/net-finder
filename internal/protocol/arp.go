@@ -68,12 +68,12 @@ func subnetSourceIP(subnet *net.IPNet, localIP net.IP) net.IP {
 func DiscoverSubnets(iface *net.Interface, duration time.Duration) ([]*net.IPNet, error) {
 	sock, err := netutil.NewRawSocket(iface.Name)
 	if err != nil {
-		return nil, fmt.Errorf("소켓 열기 실패: %v", err)
+		return nil, fmt.Errorf("failed to open socket: %v", err)
 	}
 	defer sock.Close()
 
 	if err := sock.SetBPFFilter(netutil.BPFFilterARP()); err != nil {
-		return nil, fmt.Errorf("BPF 필터 설정 실패: %v", err)
+		return nil, fmt.Errorf("failed to set BPF filter: %v", err)
 	}
 
 	seen := make(map[string]bool)
@@ -124,12 +124,12 @@ func DiscoverSubnets(iface *net.Interface, duration time.Duration) ([]*net.IPNet
 func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, subnets []*net.IPNet, timeout time.Duration) (*ARPResult, error) {
 	sock, err := netutil.NewRawSocket(iface.Name)
 	if err != nil {
-		return nil, fmt.Errorf("소켓 열기 실패: %v", err)
+		return nil, fmt.Errorf("failed to open socket: %v", err)
 	}
 	defer sock.Close()
 
 	if err := sock.SetBPFFilter(netutil.BPFFilterARP()); err != nil {
-		return nil, fmt.Errorf("BPF 필터 설정 실패: %v", err)
+		return nil, fmt.Errorf("failed to set BPF filter: %v", err)
 	}
 
 	result := NewARPResult()
@@ -155,7 +155,7 @@ func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, su
 			srcIPMap[ip.String()] = srcIP
 		}
 		if !subnet.Contains(localIP) {
-			log.Printf("원격 서브넷 %s → 소스 IP %s 사용", subnet, srcIP)
+			log.Printf("remote subnet %s → using source IP %s", subnet, srcIP)
 		}
 	}
 
@@ -182,7 +182,7 @@ func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, su
 			break
 		}
 
-		log.Printf("ARP 재시도 %d: %d개 미응답 IP", retry+1, len(missing))
+		log.Printf("ARP retry %d: %d unresponsive IPs", retry+1, len(missing))
 		for _, ip := range missing {
 			sendARPRequest(sock, iface, srcIPMap[ip.String()], localMAC, ip)
 			time.Sleep(1 * time.Millisecond)
@@ -302,11 +302,11 @@ func icmpFallbackScan(iface *net.Interface, localIP net.IP, localMAC net.Hardwar
 		return
 	}
 
-	log.Printf("ICMP 폴백 스캔: %d개 미응답 IP", len(missing))
+	log.Printf("ICMP fallback scan: %d unresponsive IPs", len(missing))
 
 	sock, err := netutil.NewRawSocket(iface.Name)
 	if err != nil {
-		log.Printf("ICMP 폴백 소켓 오류: %v", err)
+		log.Printf("ICMP fallback socket error: %v", err)
 		return
 	}
 	defer sock.Close()
@@ -409,7 +409,7 @@ func icmpFallbackScan(iface *net.Interface, localIP net.IP, localMAC net.Hardwar
 	}
 
 	if len(stillMissing) > 0 {
-		log.Printf("ICMP 재시도: %d개 미응답 IP", len(stillMissing))
+		log.Printf("ICMP retry: %d unresponsive IPs", len(stillMissing))
 		for _, ip := range stillMissing {
 			srcIP := localIP
 			if sn := findSubnet(ip); sn != nil {
@@ -426,7 +426,7 @@ func icmpFallbackScan(iface *net.Interface, localIP net.IP, localMAC net.Hardwar
 
 	found := len(missing) - len(missingSet)
 	if found > 0 {
-		log.Printf("ICMP 폴백: %d개 호스트 추가 발견", found)
+		log.Printf("ICMP fallback: %d additional hosts found", found)
 	}
 }
 

@@ -17,12 +17,12 @@ import (
 func ListenCDP(ifaceName string, duration time.Duration, stopCh <-chan struct{}) ([]models.CDPNeighbor, error) {
 	sock, err := netutil.NewRawSocket(ifaceName)
 	if err != nil {
-		return nil, fmt.Errorf("CDP 소켓 열기 실패: %v", err)
+		return nil, fmt.Errorf("failed to open CDP socket: %v", err)
 	}
 	defer sock.Close()
 
 	if err := sock.SetBPFFilter(netutil.BPFFilterCDP()); err != nil {
-		return nil, fmt.Errorf("CDP BPF 필터 설정 실패: %v", err)
+		return nil, fmt.Errorf("failed to set CDP BPF filter: %v", err)
 	}
 
 	var entries []models.CDPNeighbor

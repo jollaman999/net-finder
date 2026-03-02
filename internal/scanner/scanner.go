@@ -358,7 +358,7 @@ func (s *Scanner) run() {
 
 	ouiDB, err := oui.LoadOUI()
 	if err != nil {
-		log.Printf("OUI 로드 실패: %v", err)
+		log.Printf("failed to load OUI: %v", err)
 		ouiDB = &oui.OUIDatabase{
 			Vendors: make(map[string]string),
 		}
@@ -381,7 +381,7 @@ func (s *Scanner) run() {
 			defer scanWg.Done()
 			result, err := protocol.ARPScan(s.iface, s.localIP, s.localMAC, s.subnets, 3*time.Second)
 			if err != nil {
-				log.Printf("ARP 스캔 실패: %v", err)
+				log.Printf("ARP scan failed: %v", err)
 				return
 			}
 			s.arpResult = result
@@ -399,13 +399,13 @@ func (s *Scanner) run() {
 			if srcIPv6 == nil {
 				srcIPv6 = s.linkLocalIPv6
 			}
-			log.Printf("NDP 스캔 시작 (소스: %s)", srcIPv6)
+			log.Printf("NDP scan starting (source: %s)", srcIPv6)
 			result, err := protocol.NDPScan(s.iface, srcIPv6, s.localMAC, s.subnetsV6, 3*time.Second)
 			if err != nil {
-				log.Printf("NDP 스캔 실패: %v", err)
+				log.Printf("NDP scan failed: %v", err)
 				return
 			}
-			log.Printf("NDP 스캔 완료: %d개 호스트 발견", len(result.Entries))
+			log.Printf("NDP scan complete: %d hosts found", len(result.Entries))
 			s.ndpResult = result
 			s.processNDPResults(result)
 			s.setProgress("scan_ndp_done", 35, len(s.GetHosts()))
@@ -419,7 +419,7 @@ func (s *Scanner) run() {
 			defer scanWg.Done()
 			servers, err := protocol.DetectDHCP(s.iface, s.localMAC, 5*time.Second)
 			if err != nil {
-				log.Printf("DHCP 감지 실패: %v", err)
+				log.Printf("DHCP detection failed: %v", err)
 				return
 			}
 			s.processDHCPResults(servers)
@@ -443,7 +443,7 @@ func (s *Scanner) run() {
 			}
 			servers, err := protocol.DetectDHCPv6(s.iface, s.localMAC, srcIPv6, 5*time.Second)
 			if err != nil {
-				log.Printf("DHCPv6 감지 실패: %v", err)
+				log.Printf("DHCPv6 detection failed: %v", err)
 				return
 			}
 			s.processDHCPv6Results(servers)
@@ -456,7 +456,7 @@ func (s *Scanner) run() {
 		defer scanWg.Done()
 		entries, err := protocol.ListenHSRP(s.iface.Name, 30*time.Second, s.stopCh, s.ipMode)
 		if err != nil {
-			log.Printf("HSRP 리스너 오류: %v", err)
+			log.Printf("HSRP listener error: %v", err)
 			return
 		}
 		s.state.Mu.Lock()
@@ -467,7 +467,7 @@ func (s *Scanner) run() {
 		defer scanWg.Done()
 		entries, err := protocol.ListenVRRP(s.iface.Name, 30*time.Second, s.stopCh, s.ipMode)
 		if err != nil {
-			log.Printf("VRRP 리스너 오류: %v", err)
+			log.Printf("VRRP listener error: %v", err)
 			return
 		}
 		s.state.Mu.Lock()
@@ -478,7 +478,7 @@ func (s *Scanner) run() {
 		defer scanWg.Done()
 		entries, err := protocol.ListenLLDP(s.iface.Name, 30*time.Second, s.stopCh)
 		if err != nil {
-			log.Printf("LLDP 리스너 오류: %v", err)
+			log.Printf("LLDP listener error: %v", err)
 			return
 		}
 		s.state.Mu.Lock()
@@ -489,7 +489,7 @@ func (s *Scanner) run() {
 		defer scanWg.Done()
 		entries, err := protocol.ListenCDP(s.iface.Name, 30*time.Second, s.stopCh)
 		if err != nil {
-			log.Printf("CDP 리스너 오류: %v", err)
+			log.Printf("CDP listener error: %v", err)
 			return
 		}
 		s.state.Mu.Lock()
@@ -760,10 +760,10 @@ func (s *Scanner) arpForHostnames() []models.HostEntry {
 	if len(subnets) == 0 {
 		return nil
 	}
-	log.Printf("호스트명 해석용 내부 ARP 스캔 시작")
+	log.Printf("starting internal ARP scan for hostname resolution")
 	result, err := protocol.ARPScan(s.iface, localIP, s.localMAC, subnets, 3*time.Second)
 	if err != nil {
-		log.Printf("호스트명용 ARP 스캔 실패: %v", err)
+		log.Printf("ARP scan for hostnames failed: %v", err)
 		return nil
 	}
 	var hosts []models.HostEntry
@@ -775,7 +775,7 @@ func (s *Scanner) arpForHostnames() []models.HostEntry {
 			})
 		}
 	}
-	log.Printf("호스트명용 ARP 스캔 완료: %d개 IPv4 호스트", len(hosts))
+	log.Printf("ARP scan for hostnames complete: %d IPv4 hosts", len(hosts))
 	return hosts
 }
 
@@ -957,7 +957,7 @@ func (s *Scanner) backgroundARPMonitor() {
 
 		alerts, err := protocol.MonitorARP(s.iface.Name, baseline, gatewayIP, 5*time.Second, s.bgStopCh)
 		if err != nil {
-			log.Printf("ARP 모니터 오류: %v", err)
+			log.Printf("ARP monitor error: %v", err)
 			continue
 		}
 		if len(alerts) > 0 {
@@ -1128,7 +1128,7 @@ func (s *Scanner) backgroundNDPMonitor() {
 
 		alerts, err := protocol.MonitorNDP(s.iface.Name, baseline, gatewayIPv6, 5*time.Second, s.bgStopCh)
 		if err != nil {
-			log.Printf("NDP 모니터 오류: %v", err)
+			log.Printf("NDP monitor error: %v", err)
 			continue
 		}
 		if len(alerts) > 0 {

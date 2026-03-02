@@ -23,7 +23,7 @@ func StartWebServer(port int, sc *scanner.Scanner, alertMgr *alert.AlertManager,
 	// Serve SPA
 	webSub, err := fs.Sub(webFS, "web")
 	if err != nil {
-		return fmt.Errorf("embed FS 오류: %v", err)
+		return fmt.Errorf("embed FS error: %v", err)
 	}
 	mux.Handle("/", noCacheHandler(http.FileServer(http.FS(webSub))))
 
@@ -42,7 +42,7 @@ func StartWebServer(port int, sc *scanner.Scanner, alertMgr *alert.AlertManager,
 			return
 		}
 		if sc.IsRunning() {
-			writeJSON(w, map[string]string{"error": "스캔이 이미 실행 중입니다"})
+			writeJSON(w, map[string]string{"error": "scan is already running"})
 			return
 		}
 		sc.Start()

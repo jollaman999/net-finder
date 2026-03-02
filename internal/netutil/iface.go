@@ -45,7 +45,7 @@ func GetInterface(name string) (*net.Interface, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("적합한 네트워크 인터페이스를 찾을 수 없습니다")
+	return nil, fmt.Errorf("no suitable network interface found")
 }
 
 func GetInterfaceAddr(iface *net.Interface) (net.IP, net.HardwareAddr, error) {
@@ -60,7 +60,7 @@ func GetInterfaceAddr(iface *net.Interface) (net.IP, net.HardwareAddr, error) {
 		}
 	}
 
-	return nil, nil, fmt.Errorf("IPv4 주소를 찾을 수 없습니다")
+	return nil, nil, fmt.Errorf("no IPv4 address found")
 }
 
 func ParseSubnets(subnetStr string, iface *net.Interface) []*net.IPNet {
@@ -71,7 +71,7 @@ func ParseSubnets(subnetStr string, iface *net.Interface) []*net.IPNet {
 		for _, part := range parts {
 			_, ipnet, err := net.ParseCIDR(strings.TrimSpace(part))
 			if err != nil {
-				fmt.Printf("잘못된 서브넷 형식: %s (%v)\n", part, err)
+				fmt.Printf("invalid subnet format: %s (%v)\n", part, err)
 				continue
 			}
 			subnets = append(subnets, ipnet)
@@ -238,7 +238,7 @@ func GetInterfaceForMode(name string, mode models.IPMode) (*net.Interface, error
 		}
 	}
 
-	return nil, fmt.Errorf("적합한 네트워크 인터페이스를 찾을 수 없습니다 (모드: %s)", mode)
+	return nil, fmt.Errorf("no suitable network interface found (mode: %s)", mode)
 }
 
 // GetInterfaceAddrV6 returns the global IPv6, link-local IPv6 and MAC for an interface
@@ -271,7 +271,7 @@ func GetInterfaceAddrV6(iface *net.Interface) (globalIP, linkLocalIP net.IP, mac
 	}
 
 	if globalIP == nil && linkLocalIP == nil {
-		return nil, nil, nil, fmt.Errorf("IPv6 주소를 찾을 수 없습니다")
+		return nil, nil, nil, fmt.Errorf("no IPv6 address found")
 	}
 
 	return globalIP, linkLocalIP, mac, nil

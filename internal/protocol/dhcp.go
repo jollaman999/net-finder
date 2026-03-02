@@ -15,18 +15,18 @@ import (
 func DetectDHCP(iface *net.Interface, localMAC net.HardwareAddr, timeout time.Duration) ([]models.DHCPServerInfo, error) {
 	sock, err := netutil.NewRawSocket(iface.Name)
 	if err != nil {
-		return nil, fmt.Errorf("소켓 열기 실패: %v", err)
+		return nil, fmt.Errorf("failed to open socket: %v", err)
 	}
 	defer sock.Close()
 
 	if err := sock.SetBPFFilter(netutil.BPFFilterDHCP()); err != nil {
-		return nil, fmt.Errorf("BPF 필터 설정 실패: %v", err)
+		return nil, fmt.Errorf("failed to set BPF filter: %v", err)
 	}
 
 	xid := uint32(time.Now().UnixNano() & 0xFFFFFFFF)
 
 	if err := sendDHCPDiscover(sock, iface, localMAC, xid); err != nil {
-		return nil, fmt.Errorf("DHCP Discover 전송 실패: %v", err)
+		return nil, fmt.Errorf("failed to send DHCP Discover: %v", err)
 	}
 
 	return listenDHCPOffers(sock, xid, timeout)

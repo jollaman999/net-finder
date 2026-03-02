@@ -64,23 +64,23 @@ func apiCachePath() string {
 const defaultCustomOUI = `# ============================================================
 # IP Dup Finder - Custom MAC Vendor Mappings
 # ============================================================
-# 이 파일을 편집하여 커스텀 MAC 벤더 매핑을 추가/수정할 수 있습니다.
-# 프로그램 재시작 없이 수정 내용이 다음 실행 시 반영됩니다.
+# Edit this file to add/modify custom MAC vendor mappings.
+# Changes will be applied on next program run without restart.
 #
-# 형식: MAC_PREFIX<TAB>VENDOR_NAME
-#   - 3바이트: XX:XX:XX	Vendor Name
-#   - 2바이트: XX:XX	Vendor Name
+# Format: MAC_PREFIX<TAB>VENDOR_NAME
+#   - 3-byte: XX:XX:XX	Vendor Name
+#   - 2-byte: XX:XX	Vendor Name
 #
-# ---- 가상화 / 하이퍼바이저 ----
+# ---- Virtualization / Hypervisor ----
 FA:16:3E	OpenStack/KVM (Neutron)
 52:54:00	QEMU/KVM
 FE:54:00	libvirt/KVM
 BC:24:11	Proxmox VE
 AC:DE:48	Private/KVM
-# ---- 컨테이너 ----
+# ---- Container ----
 02:42	Docker
 02:00:00	systemd-container
-# ---- 클라우드 ----
+# ---- Cloud ----
 42:01:0A	Google Cloud
 `
 
@@ -210,7 +210,7 @@ func downloadOUI() ([]byte, error) {
 		return data, nil
 	}
 
-	return nil, fmt.Errorf("모든 소스 실패: %v", lastErr)
+	return nil, fmt.Errorf("all sources failed: %v", lastErr)
 }
 
 func (db *OUIDatabase) parseIEEEFile(path string) error {
@@ -450,7 +450,7 @@ func (db *OUIDatabase) Lookup(mac net.HardwareAddr) string {
 		return "Unknown"
 	}
 
-	// 36-bit MA-S (가장 구체적)
+	// 36-bit MA-S (most specific)
 	if len(mac) >= 5 {
 		key36 := fmt.Sprintf("%02X:%02X:%02X:%02X:%X", mac[0], mac[1], mac[2], mac[3], mac[4]>>4)
 		if vendor, ok := db.Vendors[key36]; ok {
@@ -474,13 +474,13 @@ func (db *OUIDatabase) Lookup(mac net.HardwareAddr) string {
 		}
 	}
 
-	// 2-byte 프리픽스 (Docker 등)
+	// 2-byte prefix (Docker etc.)
 	key2 := [2]byte{mac[0], mac[1]}
 	if vendor, ok := db.prefix2[key2]; ok {
 		return vendor
 	}
 
-	// API 캐시 확인
+	// Check API cache
 	db.apiMu.Lock()
 	if vendor, ok := db.apiCache[prefix]; ok {
 		db.apiMu.Unlock()
@@ -494,7 +494,7 @@ func (db *OUIDatabase) Lookup(mac net.HardwareAddr) string {
 	}
 	db.apiMu.Unlock()
 
-	// 온라인 API 조회
+	// Online API lookup
 	if vendor := db.apiLookupMAC(mac); vendor != "" {
 		return vendor
 	}

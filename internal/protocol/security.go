@@ -19,12 +19,12 @@ import (
 func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string, duration time.Duration, stopCh <-chan struct{}) ([]models.ARPSpoofAlert, error) {
 	sock, err := netutil.NewRawSocket(ifaceName)
 	if err != nil {
-		return nil, fmt.Errorf("ARP 모니터 소켓 열기 실패: %v", err)
+		return nil, fmt.Errorf("failed to open ARP monitor socket: %v", err)
 	}
 	defer sock.Close()
 
 	if err := sock.SetBPFFilter(netutil.BPFFilterARP()); err != nil {
-		return nil, fmt.Errorf("ARP 모니터 BPF 필터 설정 실패: %v", err)
+		return nil, fmt.Errorf("failed to set ARP monitor BPF filter: %v", err)
 	}
 
 	// key -> alert index + packet count
@@ -118,12 +118,12 @@ func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string
 func MonitorNDP(ifaceName string, baseline map[string][]string, gatewayIPv6 string, duration time.Duration, stopCh <-chan struct{}) ([]models.NDPSpoofAlert, error) {
 	sock, err := netutil.NewRawSocket(ifaceName)
 	if err != nil {
-		return nil, fmt.Errorf("NDP 모니터 소켓 열기 실패: %v", err)
+		return nil, fmt.Errorf("failed to open NDP monitor socket: %v", err)
 	}
 	defer sock.Close()
 
 	if err := sock.SetBPFFilter(netutil.BPFFilterNDP()); err != nil {
-		return nil, fmt.Errorf("NDP 모니터 BPF 필터 설정 실패: %v", err)
+		return nil, fmt.Errorf("failed to set NDP monitor BPF filter: %v", err)
 	}
 
 	alertIndex := make(map[string]int)
@@ -295,7 +295,7 @@ func CheckDNSSpoofing(dnsServers []string) []models.DNSSpoofAlert {
 					Response1: strings.Join(results[i].ips, ", "),
 					AlertType: "fast_response",
 					Severity:  "warning",
-					Message:   fmt.Sprintf("DNS 응답이 비정상적으로 빠름: %s (서버: %s, 응답시간: %v) - 로컬 스푸핑 의심", domain, results[i].server, results[i].elapsed),
+					Message:   fmt.Sprintf("Abnormally fast DNS response: %s (server: %s, response time: %v) - possible local spoofing", domain, results[i].server, results[i].elapsed),
 					Timestamp: time.Now().Format("2006-01-02 15:04:05"),
 				})
 			}
@@ -315,7 +315,7 @@ func CheckDNSSpoofing(dnsServers []string) []models.DNSSpoofAlert {
 						Response2: strings.Join(results[j].ips, ", "),
 						AlertType: "mismatch",
 						Severity:  "critical",
-						Message:   fmt.Sprintf("DNS 응답 불일치: %s (서버 %s: %s vs 서버 %s: %s)", domain, results[i].server, strings.Join(results[i].ips, ","), results[j].server, strings.Join(results[j].ips, ",")),
+						Message:   fmt.Sprintf("DNS response mismatch: %s (server %s: %s vs server %s: %s)", domain, results[i].server, strings.Join(results[i].ips, ","), results[j].server, strings.Join(results[j].ips, ",")),
 						Timestamp: time.Now().Format("2006-01-02 15:04:05"),
 					})
 				}

@@ -50,12 +50,12 @@ func NDPScan(iface *net.Interface, localIPv6 net.IP, localMAC net.HardwareAddr,
 
 	sock, err := netutil.NewRawSocket(iface.Name)
 	if err != nil {
-		return nil, fmt.Errorf("NDP 소켓 열기 실패: %v", err)
+		return nil, fmt.Errorf("failed to open NDP socket: %v", err)
 	}
 	defer sock.Close()
 
 	if err := sock.SetBPFFilter(netutil.BPFFilterICMPv6()); err != nil {
-		return nil, fmt.Errorf("NDP BPF 필터 설정 실패: %v", err)
+		return nil, fmt.Errorf("failed to set NDP BPF filter: %v", err)
 	}
 
 	result := NewNDPResult()
@@ -88,19 +88,19 @@ func NDPScan(iface *net.Interface, localIPv6 net.IP, localMAC net.HardwareAddr,
 	if srcIP == nil {
 		close(done)
 		wg.Wait()
-		return nil, fmt.Errorf("IPv6 주소를 찾을 수 없습니다")
+		return nil, fmt.Errorf("no IPv6 address found")
 	}
 
 	// Round 1: multicast ping
 	if err := sendICMPv6Echo(sock, srcIP, localMAC, allNodesMAC, allNodesIP); err != nil {
-		log.Printf("NDP 멀티캐스트 전송 실패: %v", err)
+		log.Printf("NDP multicast send failed: %v", err)
 	}
 
 	time.Sleep(timeout)
 
 	// Round 2: retry
 	if err := sendICMPv6Echo(sock, srcIP, localMAC, allNodesMAC, allNodesIP); err != nil {
-		log.Printf("NDP 멀티캐스트 재시도 실패: %v", err)
+		log.Printf("NDP multicast retry failed: %v", err)
 	}
 
 	time.Sleep(2 * time.Second)

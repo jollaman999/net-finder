@@ -17,12 +17,12 @@ import (
 func ListenLLDP(ifaceName string, duration time.Duration, stopCh <-chan struct{}) ([]models.LLDPNeighbor, error) {
 	sock, err := netutil.NewRawSocket(ifaceName)
 	if err != nil {
-		return nil, fmt.Errorf("LLDP 소켓 열기 실패: %v", err)
+		return nil, fmt.Errorf("failed to open LLDP socket: %v", err)
 	}
 	defer sock.Close()
 
 	if err := sock.SetBPFFilter(netutil.BPFFilterLLDP()); err != nil {
-		return nil, fmt.Errorf("LLDP BPF 필터 설정 실패: %v", err)
+		return nil, fmt.Errorf("failed to set LLDP BPF filter: %v", err)
 	}
 
 	var entries []models.LLDPNeighbor

@@ -27,7 +27,7 @@ var hsrpStateNames = map[byte]string{
 func ListenHSRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}, mode ...models.IPMode) ([]models.HSRPEntry, error) {
 	sock, err := netutil.NewRawSocket(ifaceName)
 	if err != nil {
-		return nil, fmt.Errorf("HSRP 소켓 열기 실패: %v", err)
+		return nil, fmt.Errorf("failed to open HSRP socket: %v", err)
 	}
 	defer sock.Close()
 
@@ -45,7 +45,7 @@ func ListenHSRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}
 		bpfFilter = netutil.BPFFilterHSRPDual()
 	}
 	if err := sock.SetBPFFilter(bpfFilter); err != nil {
-		return nil, fmt.Errorf("HSRP BPF 필터 설정 실패: %v", err)
+		return nil, fmt.Errorf("failed to set HSRP BPF filter: %v", err)
 	}
 
 	var entries []models.HSRPEntry

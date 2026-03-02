@@ -20,12 +20,12 @@ func DetectDHCPv6(iface *net.Interface, localMAC net.HardwareAddr,
 
 	sock, err := netutil.NewRawSocket(iface.Name)
 	if err != nil {
-		return nil, fmt.Errorf("DHCPv6 소켓 열기 실패: %v", err)
+		return nil, fmt.Errorf("failed to open DHCPv6 socket: %v", err)
 	}
 	defer sock.Close()
 
 	if err := sock.SetBPFFilter(netutil.BPFFilterDHCPv6()); err != nil {
-		return nil, fmt.Errorf("DHCPv6 BPF 필터 설정 실패: %v", err)
+		return nil, fmt.Errorf("failed to set DHCPv6 BPF filter: %v", err)
 	}
 
 	// Use link-local address as source
@@ -40,13 +40,13 @@ func DetectDHCPv6(iface *net.Interface, localMAC net.HardwareAddr,
 		}
 	}
 	if srcIP == nil {
-		return nil, fmt.Errorf("DHCPv6: IPv6 링크 로컬 주소를 찾을 수 없습니다")
+		return nil, fmt.Errorf("DHCPv6: no IPv6 link-local address found")
 	}
 
 	xid := uint32(time.Now().UnixNano() & 0xFFFFFF) // 24-bit transaction ID
 
 	if err := sendDHCPv6Solicit(sock, iface, localMAC, srcIP, xid); err != nil {
-		return nil, fmt.Errorf("DHCPv6 Solicit 전송 실패: %v", err)
+		return nil, fmt.Errorf("failed to send DHCPv6 Solicit: %v", err)
 	}
 
 	return listenDHCPv6Advertise(sock, xid, timeout)

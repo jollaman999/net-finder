@@ -17,7 +17,7 @@ import (
 func ListenVRRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}, mode ...models.IPMode) ([]models.VRRPEntry, error) {
 	sock, err := netutil.NewRawSocket(ifaceName)
 	if err != nil {
-		return nil, fmt.Errorf("VRRP 소켓 열기 실패: %v", err)
+		return nil, fmt.Errorf("failed to open VRRP socket: %v", err)
 	}
 	defer sock.Close()
 
@@ -35,7 +35,7 @@ func ListenVRRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}
 		bpfFilter = netutil.BPFFilterVRRPDual()
 	}
 	if err := sock.SetBPFFilter(bpfFilter); err != nil {
-		return nil, fmt.Errorf("VRRP BPF 필터 설정 실패: %v", err)
+		return nil, fmt.Errorf("failed to set VRRP BPF filter: %v", err)
 	}
 
 	var entries []models.VRRPEntry
