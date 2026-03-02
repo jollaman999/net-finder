@@ -17,7 +17,7 @@ import (
 var webFS embed.FS
 
 // StartWebServer starts the HTTP server with API endpoints
-func StartWebServer(port int, sc *scanner.Scanner, alertMgr *alert.AlertManager, currentIface string) error {
+func StartWebServer(port int, sc *scanner.Scanner, alertMgr *alert.AlertManager, currentIface string, version string) error {
 	mux := http.NewServeMux()
 
 	// Serve SPA
@@ -174,6 +174,18 @@ func StartWebServer(port int, sc *scanner.Scanner, alertMgr *alert.AlertManager,
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
+	})
+
+	mux.HandleFunc("/api/version", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		v := version
+		if v == "" {
+			v = "dev"
+		}
+		writeJSON(w, map[string]string{"version": v})
 	})
 
 	mux.HandleFunc("/api/interfaces", func(w http.ResponseWriter, r *http.Request) {

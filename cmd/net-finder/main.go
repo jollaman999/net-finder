@@ -151,7 +151,7 @@ func main() {
 	}()
 
 	log.Printf("Web server starting: %s", addr)
-	if err := server.StartWebServer(*port, sc, alertMgr, iface.Name); err != nil {
+	if err := server.StartWebServer(*port, sc, alertMgr, iface.Name, version); err != nil {
 		log.Fatalf("Web server failed: %v", err)
 	}
 }

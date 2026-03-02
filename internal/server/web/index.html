@@ -452,9 +452,20 @@ tr.subnet-header:hover { background: var(--primary-light); }
   th, td { padding: 6px 8px; font-size: 12px; }
   .info-grid { grid-template-columns: 1fr; }
 }
+#versionTag {
+  position: fixed;
+  bottom: 8px;
+  right: 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  z-index: 1;
+  pointer-events: none;
+}
 </style>
 </head>
 <body>
+<div id="versionTag"></div>
 <header>
   <h1><span>Net Finder</span></h1>
   <div class="header-controls">
@@ -2317,6 +2328,7 @@ function renderAlertList(configs) {
 }
 
 // ── Init ──
+fetch('/api/version').then(r=>r.json()).then(d=>{document.getElementById('versionTag').textContent=d.version}).catch(()=>{});
 initTheme();
 initLanguage();
 pollData();
