@@ -327,6 +327,8 @@ tr.subnet-header:hover { background: var(--primary-light); }
 .info-card h4 { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
 .info-card .value { font-size: 16px; font-weight: 600; }
 .mac-cell { font-family: 'Courier New', monospace; font-size: 12px; }
+.hostname-cell .hn { display: block; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; -webkit-tap-highlight-color: rgba(0,0,0,0.1); }
+.hostname-cell.expanded .hn { white-space: normal; word-break: break-all; overflow: visible; }
 .modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -479,6 +481,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
   table { font-size: 11px; }
   th, td { padding: 5px 6px; font-size: 11px; white-space: nowrap; }
   .mac-cell { font-size: 10px; }
+  .hostname-cell .hn { max-width: 100px; font-size: 10px; }
   .progress-section { padding: 8px; margin: 8px 0; }
   .progress-text { font-size: 12px; }
 }
@@ -1698,6 +1701,9 @@ function toggleSubnetFilter(panelKey, subnet, checked) {
   else renderConflictsTable();
 }
 
+// ── Expanded hostname tracking ──
+const expandedHostnames = new Set();
+
 // ── Hosts table (grouped) ──
 const hostsFields = [null, 'ip', 'hostname', 'mac', 'vendor'];
 
@@ -1754,7 +1760,9 @@ function renderHostsTable() {
           macCell = esc(h.mac);
           vendorCell = esc(h.vendor);
         }
-        html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td>${esc(h.hostname||'-')}</td><td class="mac-cell">${macCell}</td><td>${vendorCell}</td></tr>`;
+        const hnExp = expandedHostnames.has(h.ip) ? ' expanded' : '';
+        const hn = esc(h.hostname||'-');
+        html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td class="mac-cell">${macCell}</td><td>${vendorCell}</td></tr>`;
       }
     }
   }
@@ -1802,7 +1810,9 @@ function renderConflictsTable() {
 
     if (!isCollapsed) {
       for (const c of filtered) {
-        html += `<tr class="severity-critical"><td>${esc(c.ip)}</td><td>${esc(c.hostname||'-')}</td><td class="mac-cell">${(c.macs||[]).map(esc).join('<br>')}</td><td>${(c.vendors||[]).map(esc).join('<br>')}</td></tr>`;
+        const hnExp = expandedHostnames.has(c.ip) ? ' expanded' : '';
+        const hn = esc(c.hostname||'-');
+        html += `<tr class="severity-critical"><td>${esc(c.ip)}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(c.ip)}')" title="${escAttr(c.hostname||'')}">${hn}</span></td><td class="mac-cell">${(c.macs||[]).map(esc).join('<br>')}</td><td>${(c.vendors||[]).map(esc).join('<br>')}</td></tr>`;
       }
     }
   }
@@ -2395,6 +2405,13 @@ function renderAlertList(configs) {
       + '</div></div>';
   }
   container.innerHTML = html;
+}
+
+// ── Hostname cell tap to expand/collapse ──
+function toggleHostname(el, ip) {
+  if (expandedHostnames.has(ip)) expandedHostnames.delete(ip);
+  else expandedHostnames.add(ip);
+  el.classList.toggle('expanded');
 }
 
 // ── Init ──
