@@ -990,6 +990,12 @@ func (s *Scanner) backgroundARPMonitor() {
 					a.OldVendor = s.lookupVendor(a.OldMAC)
 					a.NewVendor = s.lookupVendor(a.NewMAC)
 					s.state.ARPAlerts = append(s.state.ARPAlerts, a)
+					s.state.Conflicts = append(s.state.Conflicts, models.ConflictEntry{
+						IP:      a.IP,
+						MACs:    []string{a.OldMAC, a.NewMAC},
+						Vendors: []string{a.OldVendor, a.NewVendor},
+						Subnet:  a.Subnet,
+					})
 					if !s.emailedARPKeys[key] {
 						s.emailedARPKeys[key] = true
 						newARPAlerts = append(newARPAlerts, a)
