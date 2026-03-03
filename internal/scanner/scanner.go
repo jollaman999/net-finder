@@ -979,10 +979,21 @@ func (s *Scanner) backgroundARPMonitor() {
 				if !merged {
 					a.Subnet = s.findSubnet(net.ParseIP(a.IP))
 					s.state.ARPAlerts = append(s.state.ARPAlerts, a)
+					var vendors []string
+					for _, macStr := range []string{a.OldMAC, a.NewMAC} {
+						v := "Unknown"
+						if s.oui != nil {
+							if hw, err := net.ParseMAC(macStr); err == nil {
+								v = s.oui.Lookup(hw)
+							}
+						}
+						vendors = append(vendors, v)
+					}
 					newConflicts = append(newConflicts, models.ConflictEntry{
-						IP:     a.IP,
-						MACs:   []string{a.OldMAC, a.NewMAC},
-						Subnet: a.Subnet,
+						IP:      a.IP,
+						MACs:    []string{a.OldMAC, a.NewMAC},
+						Vendors: vendors,
+						Subnet:  a.Subnet,
 					})
 					if !s.emailedARPKeys[key] {
 						s.emailedARPKeys[key] = true
