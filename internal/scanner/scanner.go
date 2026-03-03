@@ -820,6 +820,16 @@ func (s *Scanner) findSubnet(ip net.IP) string {
 	return ""
 }
 
+// lookupVendor resolves a MAC address string to its vendor name
+func (s *Scanner) lookupVendor(macStr string) string {
+	if s.oui != nil {
+		if hw, err := net.ParseMAC(macStr); err == nil {
+			return s.oui.Lookup(hw)
+		}
+	}
+	return "Unknown"
+}
+
 // backgroundProtocolListeners continuously listens for protocol advertisements
 func (s *Scanner) backgroundProtocolListeners() {
 	for {
@@ -978,21 +988,13 @@ func (s *Scanner) backgroundARPMonitor() {
 				}
 				if !merged {
 					a.Subnet = s.findSubnet(net.ParseIP(a.IP))
+					a.OldVendor = s.lookupVendor(a.OldMAC)
+					a.NewVendor = s.lookupVendor(a.NewMAC)
 					s.state.ARPAlerts = append(s.state.ARPAlerts, a)
-					var vendors []string
-					for _, macStr := range []string{a.OldMAC, a.NewMAC} {
-						v := "Unknown"
-						if s.oui != nil {
-							if hw, err := net.ParseMAC(macStr); err == nil {
-								v = s.oui.Lookup(hw)
-							}
-						}
-						vendors = append(vendors, v)
-					}
 					newConflicts = append(newConflicts, models.ConflictEntry{
 						IP:      a.IP,
 						MACs:    []string{a.OldMAC, a.NewMAC},
-						Vendors: vendors,
+						Vendors: []string{a.OldVendor, a.NewVendor},
 						Subnet:  a.Subnet,
 					})
 					if !s.emailedARPKeys[key] {
@@ -1158,6 +1160,8 @@ func (s *Scanner) backgroundNDPMonitor() {
 					}
 				}
 				if !merged {
+					a.OldVendor = s.lookupVendor(a.OldMAC)
+					a.NewVendor = s.lookupVendor(a.NewMAC)
 					s.state.NDPAlerts = append(s.state.NDPAlerts, a)
 					if !s.emailedNDPKeys[key] {
 						s.emailedNDPKeys[key] = true

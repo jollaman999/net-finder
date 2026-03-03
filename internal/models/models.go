@@ -105,6 +105,8 @@ type NDPSpoofAlert struct {
 	IP        string `json:"ip"`
 	OldMAC    string `json:"oldMAC"`
 	NewMAC    string `json:"newMAC"`
+	OldVendor string `json:"oldVendor,omitempty"`
+	NewVendor string `json:"newVendor,omitempty"`
 	AlertType string `json:"alertType"`
 	Severity  string `json:"severity"`
 	Message   string `json:"message"`
@@ -174,6 +176,8 @@ type ARPSpoofAlert struct {
 	IP        string `json:"ip"`
 	OldMAC    string `json:"oldMAC"`
 	NewMAC    string `json:"newMAC"`
+	OldVendor string `json:"oldVendor,omitempty"`
+	NewVendor string `json:"newVendor,omitempty"`
 	AlertType string `json:"alertType"`
 	Severity  string `json:"severity"`
 	Message   string `json:"message"`
