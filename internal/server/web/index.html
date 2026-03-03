@@ -51,6 +51,8 @@ body {
   background: var(--bg);
   color: var(--text);
   line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 .container { max-width: 1400px; margin: 0 auto; padding: 16px; }
 header {
@@ -294,6 +296,25 @@ tr.subnet-header:hover { background: var(--primary-light); }
   font-size: 11px;
   transition: transform 0.15s;
 }
+.vendor-subheader {
+  background: var(--bg-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.vendor-subheader td {
+  font-weight: 600;
+  font-size: 11px;
+  padding: 3px 12px 2px 32px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.vendor-subheader .subnet-count {
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--text-secondary);
+  margin-left: 6px;
+  opacity: 0.7;
+}
 .text-danger { color: var(--danger); }
 .text-warning { color: var(--warning); }
 .text-success { color: var(--success); }
@@ -463,6 +484,8 @@ tr.subnet-header:hover { background: var(--primary-light); }
   .search-box { max-width: 100%; }
   table { font-size: 12px; }
   th, td { padding: 6px 8px; font-size: 12px; }
+  .subnet-header td { font-size: 13px; }
+  .vendor-subheader td { font-size: 11px; padding: 3px 8px 2px 28px; }
   .mac-cell { font-size: 11px; word-break: break-all; }
   .info-grid { grid-template-columns: 1fr; }
   .empty-state { padding: 24px 12px; }
@@ -480,6 +503,8 @@ tr.subnet-header:hover { background: var(--primary-light); }
   .tab-content { padding: 8px; }
   table { font-size: 11px; }
   th, td { padding: 5px 6px; font-size: 11px; white-space: nowrap; }
+  .subnet-header td { font-size: 12px; }
+  .vendor-subheader td { font-size: 11px; font-weight: 600; padding: 2px 6px 2px 24px; }
   .mac-cell { font-size: 10px; }
   .hostname-cell .hn { max-width: 100px; font-size: 10px; }
   .progress-section { padding: 8px; margin: 8px 0; }
@@ -1428,7 +1453,7 @@ let macToIP = {};
 let conflictMap = {};
 
 // Collapse state per table: Set of collapsed subnet strings
-const collapsed = { hosts: new Set(), conflicts: new Set() };
+const collapsed = { hosts: new Set(), conflicts: new Set(), vendors: new Set() };
 
 // Subnet filter: Set of enabled (checked) subnets per panel
 const enabledSubnets = { hosts: new Set(), conflicts: new Set() };
@@ -1743,26 +1768,70 @@ function renderHostsTable() {
     html += `<tr class="subnet-header" onclick="toggleSubnet('hosts','${escAttr(subnet)}')"><td colspan="${cols}"><span class="collapse-arrow">${arrow}</span> ${esc(subnet)}<span class="subnet-count">${shown}${tp('hosts_count', shown)}</span></td></tr>`;
 
     if (!isCollapsed) {
-      for (const h of filtered) {
-        idx++;
-        const conf = conflictMap[h.ip];
-        let macCell, vendorCell, badge = '', rowClass = '';
-        if (conf) {
-          macCell = (conf.macs||[]).map(esc).join('<br>');
-          vendorCell = (conf.vendors||[]).map(esc).join('<br>');
-          badge = ' <span class="text-danger" style="font-size:11px;font-weight:600">[Conflicted]</span>';
-          rowClass = ' class="severity-critical"';
-        } else if (h.isBond && h.bondMACs && h.bondMACs.length > 0) {
-          macCell = h.bondMACs.map(esc).join('<br>');
-          vendorCell = (h.bondVendors||[]).map(esc).join('<br>');
-          badge = ' <span class="text-cyan" style="font-size:11px;font-weight:600">[Multi-NIC/Bond]</span>';
-        } else {
-          macCell = esc(h.mac);
-          vendorCell = esc(h.vendor);
+      const isLinkLocal = subnet.toLowerCase().startsWith('fe80');
+
+      // For link-local subnets, sub-group by vendor
+      if (isLinkLocal && filtered.length > 1) {
+        const vendorGroups = {};
+        const vendorOrder = [];
+        for (const h of filtered) {
+          const v = h.vendor || 'Unknown';
+          if (!vendorGroups[v]) { vendorGroups[v] = []; vendorOrder.push(v); }
+          vendorGroups[v].push(h);
         }
-        const hnExp = expandedHostnames.has(h.ip) ? ' expanded' : '';
-        const hn = esc(h.hostname||'-');
-        html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td class="mac-cell">${macCell}</td><td>${vendorCell}</td></tr>`;
+        for (const vname of vendorOrder) {
+          const vhosts = vendorGroups[vname];
+          if (vendorOrder.length > 1 || vhosts.length > 1) {
+            const vkey = subnet + ':' + vname;
+            const vCollapsed = collapsed.vendors.has(vkey);
+            const varrow = vCollapsed ? '\u25B6' : '\u25BC';
+            html += `<tr class="vendor-subheader" onclick="toggleVendorGroup('${escAttr(vkey)}')"><td colspan="${cols}"><span class="collapse-arrow">${varrow}</span> ${esc(vname)}<span class="subnet-count">${vhosts.length}</span></td></tr>`;
+            if (vCollapsed) continue;
+          }
+          for (const h of vhosts) {
+            idx++;
+            const conf = conflictMap[h.ip];
+            let macCell, vendorCell, badge = '', rowClass = '';
+            if (conf) {
+              macCell = (conf.macs||[]).map(esc).join('<br>');
+              vendorCell = (conf.vendors||[]).map(esc).join('<br>');
+              badge = ' <span class="text-danger" style="font-size:11px;font-weight:600">[Conflicted]</span>';
+              rowClass = ' class="severity-critical"';
+            } else if (h.isBond && h.bondMACs && h.bondMACs.length > 0) {
+              macCell = h.bondMACs.map(esc).join('<br>');
+              vendorCell = (h.bondVendors||[]).map(esc).join('<br>');
+              badge = ' <span class="text-cyan" style="font-size:11px;font-weight:600">[Multi-NIC/Bond]</span>';
+            } else {
+              macCell = esc(h.mac);
+              vendorCell = esc(h.vendor);
+            }
+            const hnExp = expandedHostnames.has(h.ip) ? ' expanded' : '';
+            const hn = esc(h.hostname||'-');
+            html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td class="mac-cell">${macCell}</td><td>${vendorCell}</td></tr>`;
+          }
+        }
+      } else {
+        for (const h of filtered) {
+          idx++;
+          const conf = conflictMap[h.ip];
+          let macCell, vendorCell, badge = '', rowClass = '';
+          if (conf) {
+            macCell = (conf.macs||[]).map(esc).join('<br>');
+            vendorCell = (conf.vendors||[]).map(esc).join('<br>');
+            badge = ' <span class="text-danger" style="font-size:11px;font-weight:600">[Conflicted]</span>';
+            rowClass = ' class="severity-critical"';
+          } else if (h.isBond && h.bondMACs && h.bondMACs.length > 0) {
+            macCell = h.bondMACs.map(esc).join('<br>');
+            vendorCell = (h.bondVendors||[]).map(esc).join('<br>');
+            badge = ' <span class="text-cyan" style="font-size:11px;font-weight:600">[Multi-NIC/Bond]</span>';
+          } else {
+            macCell = esc(h.mac);
+            vendorCell = esc(h.vendor);
+          }
+          const hnExp = expandedHostnames.has(h.ip) ? ' expanded' : '';
+          const hn = esc(h.hostname||'-');
+          html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td class="mac-cell">${macCell}</td><td>${vendorCell}</td></tr>`;
+        }
       }
     }
   }
@@ -1826,6 +1895,10 @@ function toggleSubnet(tableKey, subnet) {
   if (set.has(subnet)) set.delete(subnet); else set.add(subnet);
   if (tableKey === 'hosts') renderHostsTable();
   else renderConflictsTable();
+}
+function toggleVendorGroup(key) {
+  if (collapsed.vendors.has(key)) collapsed.vendors.delete(key); else collapsed.vendors.add(key);
+  renderHostsTable();
 }
 
 // ── Simple table renderer (non-grouped tables) ──
