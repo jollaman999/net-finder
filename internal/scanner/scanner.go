@@ -971,7 +971,6 @@ func (s *Scanner) backgroundARPMonitor() {
 			continue
 		}
 		if len(alerts) > 0 {
-			var newConflicts []models.ConflictEntry
 			var newARPAlerts []models.ARPSpoofAlert
 			s.state.Mu.Lock()
 			for _, a := range alerts {
@@ -991,25 +990,13 @@ func (s *Scanner) backgroundARPMonitor() {
 					a.OldVendor = s.lookupVendor(a.OldMAC)
 					a.NewVendor = s.lookupVendor(a.NewMAC)
 					s.state.ARPAlerts = append(s.state.ARPAlerts, a)
-					newConflicts = append(newConflicts, models.ConflictEntry{
-						IP:      a.IP,
-						MACs:    []string{a.OldMAC, a.NewMAC},
-						Vendors: []string{a.OldVendor, a.NewVendor},
-						Subnet:  a.Subnet,
-					})
 					if !s.emailedARPKeys[key] {
 						s.emailedARPKeys[key] = true
 						newARPAlerts = append(newARPAlerts, a)
 					}
 				}
 			}
-			if len(newConflicts) > 0 {
-				s.state.Conflicts = append(s.state.Conflicts, newConflicts...)
-			}
 			s.state.Mu.Unlock()
-			if s.alertMgr != nil && len(newConflicts) > 0 {
-				go s.alertMgr.SendConflictAlerts(newConflicts)
-			}
 			if s.alertMgr != nil && len(newARPAlerts) > 0 {
 				go s.alertMgr.SendSecurityAlerts(newARPAlerts, nil)
 			}
