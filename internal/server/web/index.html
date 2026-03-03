@@ -2312,13 +2312,15 @@ function renderAlertList(configs) {
   for (const c of configs) {
     const v4Sub = c.subnetsV4 && c.subnetsV4.length > 0 ? c.subnetsV4.join(', ') : t('alert_subnets_all');
     const v6Sub = c.subnetsV6 && c.subnetsV6.length > 0 ? c.subnetsV6.join(', ') : t('alert_subnets_all');
-    const subnetsLabel = 'IPv4: ' + v4Sub + ' | IPv6: ' + v6Sub;
     const v4Ev = c.eventsV4 && c.eventsV4.length > 0 ? c.eventsV4.map(e => t(alertEventI18n[e] || e)).join(', ') : t('alert_events_all');
     const v6Ev = c.eventsV6 && c.eventsV6.length > 0 ? c.eventsV6.map(e => t(alertEventI18n[e] || e)).join(', ') : t('alert_events_all');
-    const eventsLabel = 'IPv4: ' + v4Ev + ' | IPv6: ' + v6Ev;
     const fromTo = (c.smtpFrom || '?') + ' &rarr; ' + (c.smtpTo || '?');
     const flags = [c.smtpHost + ':' + (c.smtpPort||465), c.smtpSSL ? 'SSL' : 'STARTTLS', c.smtpAuth ? 'AUTH' : ''].filter(Boolean).join(' | ');
-    html += '<div class="alert-list-item"><div class="alert-info"><strong>EMAIL</strong> &mdash; ' + fromTo + '<br><span style="font-size:12px;color:var(--text-secondary)">' + esc(flags) + ' / ' + esc(subnetsLabel) + '<br>' + esc(eventsLabel) + '</span></div>'
+    html += '<div class="alert-list-item"><div class="alert-info"><strong>EMAIL</strong> &mdash; ' + fromTo
+      + '<br><span style="font-size:12px;color:var(--text-secondary)">' + esc(flags)
+      + '<br><b>IPv4</b> ' + esc(v4Sub) + ' | ' + esc(v4Ev)
+      + '<br><b>IPv6</b> ' + esc(v6Sub) + ' | ' + esc(v6Ev)
+      + '</span></div>'
       + '<div style="display:flex;gap:4px">'
       + '<button class="btn-sm btn-primary" onclick="editAlert(\'' + escAttr(c.id) + '\')" data-i18n="btn_edit">' + esc(t('btn_edit')) + '</button>'
       + '<button class="btn-sm btn-danger" onclick="deleteAlert(\'' + escAttr(c.id) + '\')" data-i18n="btn_delete">' + esc(t('btn_delete')) + '</button>'
