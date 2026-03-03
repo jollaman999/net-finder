@@ -448,10 +448,39 @@ tr.subnet-header:hover { background: var(--primary-light); }
 @media (max-width: 768px) {
   .container { padding: 8px; }
   header { padding: 8px 12px; flex-wrap: wrap; gap: 8px; }
-  .tabs { flex-wrap: nowrap; }
+  header h1 { font-size: 16px; }
+  .header-controls { gap: 6px; flex-wrap: wrap; }
+  .header-controls .btn { padding: 5px 10px; font-size: 12px; }
+  .header-controls .lang-select { font-size: 12px; }
+  .header-controls .theme-toggle { font-size: 12px; }
+  .progress-section { padding: 10px; margin: 10px 0; }
+  .tabs { flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
   .tab { padding: 8px 12px; font-size: 12px; }
+  .tab-content { padding: 10px; }
+  .search-box { max-width: 100%; }
+  table { font-size: 12px; }
   th, td { padding: 6px 8px; font-size: 12px; }
+  .mac-cell { font-size: 11px; word-break: break-all; }
   .info-grid { grid-template-columns: 1fr; }
+  .empty-state { padding: 24px 12px; }
+  .empty-state p { font-size: 13px; }
+  #panel-security h3 { font-size: 14px; }
+  .modal { width: 95%; }
+  .modal-header { padding: 12px 14px; }
+  .modal-body { padding: 14px; }
+}
+@media (max-width: 480px) {
+  header h1 { font-size: 14px; width: 100%; }
+  .header-controls { width: 100%; justify-content: flex-start; }
+  .header-controls .btn { padding: 4px 8px; font-size: 11px; }
+  .tab { padding: 7px 10px; font-size: 11px; }
+  .tab-content { padding: 8px; }
+  table { font-size: 11px; }
+  th, td { padding: 5px 6px; font-size: 11px; white-space: nowrap; }
+  .mac-cell { font-size: 10px; }
+  .progress-section { padding: 8px; margin: 8px 0; }
+  .progress-text { font-size: 12px; }
 }
 #versionTag {
   position: fixed;
