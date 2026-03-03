@@ -1015,10 +1015,29 @@ func (s *Scanner) processNDPResults(result *protocol.NDPResult) {
 	result.Mu.Lock()
 	defer result.Mu.Unlock()
 
+	// Build set of MACs that have a global (non-link-local) address
+	globalMACs := make(map[string]bool)
+	for ipStr, macs := range result.Entries {
+		ip := net.ParseIP(ipStr)
+		if ip != nil && !ip.IsLinkLocalUnicast() {
+			for _, m := range macs {
+				globalMACs[strings.ToUpper(m.String())] = true
+			}
+		}
+	}
+
 	var hosts []models.HostEntry
 
 	for ipStr, macs := range result.Entries {
+		ip := net.ParseIP(ipStr)
 		mac := macs[0]
+		macStr := strings.ToUpper(mac.String())
+
+		// Skip link-local if this MAC already has a global address
+		if ip != nil && ip.IsLinkLocalUnicast() && globalMACs[macStr] {
+			continue
+		}
+
 		vendor := "Unknown"
 		if s.oui != nil {
 			vendor = s.oui.Lookup(mac)
@@ -1026,9 +1045,9 @@ func (s *Scanner) processNDPResults(result *protocol.NDPResult) {
 
 		host := models.HostEntry{
 			IP:        ipStr,
-			MAC:       strings.ToUpper(mac.String()),
+			MAC:       macStr,
 			Vendor:    vendor,
-			Subnet:    s.findSubnet(net.ParseIP(ipStr)),
+			Subnet:    s.findSubnet(ip),
 			IPVersion: 6,
 		}
 
