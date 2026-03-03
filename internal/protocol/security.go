@@ -15,6 +15,12 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
+// macEvent records a MAC change for flapping detection
+type macEvent struct {
+	mac  string
+	time time.Time
+}
+
 // MonitorARP monitors ARP traffic for spoofing indicators
 func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string, duration time.Duration, stopCh <-chan struct{}) ([]models.ARPSpoofAlert, error) {
 	sock, err := netutil.NewRawSocket(ifaceName)
@@ -31,6 +37,11 @@ func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string
 	alertIndex := make(map[string]int)
 	var alerts []models.ARPSpoofAlert
 	var mu sync.Mutex
+
+	// MAC flapping detection: IP -> recent MAC change history
+	macHistory := make(map[string][]macEvent) // IP -> recent events
+	lastMAC := make(map[string]string)        // IP -> last seen MAC
+	flapAlerted := make(map[string]bool)      // IP -> already alerted for flapping
 
 	deadline := time.Now().Add(duration)
 
@@ -60,6 +71,13 @@ func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string
 			continue
 		}
 
+		// Extract Ethernet layer for MAC mismatch detection
+		ethLayer := packet.Layer(layers.LayerTypeEthernet)
+		if ethLayer == nil {
+			continue
+		}
+		eth := ethLayer.(*layers.Ethernet)
+
 		senderIP := net.IP(arp.SourceProtAddress).To4()
 		senderMAC := net.HardwareAddr(arp.SourceHwAddress)
 
@@ -69,11 +87,35 @@ func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string
 
 		ipStr := senderIP.String()
 		macStr := senderMAC.String()
+		ethMAC := eth.SrcMAC.String()
 		now := time.Now()
+		nowStr := now.Format("2006-01-02 15:04:05")
 
 		mu.Lock()
 
-		// Check for unknown MAC (not in baseline)
+		// 1) MAC mismatch detection: Ethernet src MAC != ARP sender MAC
+		if ethMAC != macStr {
+			key := "mismatch:" + ipStr + ":" + ethMAC + ":" + macStr
+			if idx, exists := alertIndex[key]; exists {
+				alerts[idx].Count++
+				alerts[idx].Timestamp = nowStr
+			} else {
+				alertIndex[key] = len(alerts)
+				alerts = append(alerts, models.ARPSpoofAlert{
+					IP:        ipStr,
+					OldMAC:    ethMAC,
+					NewMAC:    macStr,
+					AlertType: "mac_mismatch",
+					Severity:  "critical",
+					Message:   fmt.Sprintf("Ethernet src MAC (%s) != ARP sender MAC (%s)", ethMAC, macStr),
+					Count:     1,
+					FirstSeen: nowStr,
+					Timestamp: nowStr,
+				})
+			}
+		}
+
+		// 2) Baseline MAC change detection (existing "spoof" logic)
 		if knownMACs, ok := baseline[ipStr]; ok {
 			found := false
 			for _, km := range knownMACs {
@@ -83,11 +125,10 @@ func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string
 				}
 			}
 			if !found {
-				key := ipStr + ":" + macStr
+				key := "spoof:" + ipStr + ":" + macStr
 				if idx, exists := alertIndex[key]; exists {
-					// Update existing alert
 					alerts[idx].Count++
-					alerts[idx].Timestamp = now.Format("2006-01-02 15:04:05")
+					alerts[idx].Timestamp = nowStr
 				} else {
 					severity := "warning"
 					if ipStr == gatewayIP {
@@ -101,11 +142,42 @@ func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string
 						AlertType: "spoof",
 						Severity:  severity,
 						Count:     1,
-						FirstSeen: now.Format("2006-01-02 15:04:05"),
-						Timestamp: now.Format("2006-01-02 15:04:05"),
+						FirstSeen: nowStr,
+						Timestamp: nowStr,
 					})
 				}
 			}
+
+			// 3) MAC flapping detection (only for baseline IPs)
+			if prev, hasPrev := lastMAC[ipStr]; hasPrev && prev != macStr {
+				macHistory[ipStr] = append(macHistory[ipStr], macEvent{mac: macStr, time: now})
+				// Prune events older than 30 seconds
+				cutoff := now.Add(-30 * time.Second)
+				events := macHistory[ipStr]
+				start := 0
+				for start < len(events) && events[start].time.Before(cutoff) {
+					start++
+				}
+				macHistory[ipStr] = events[start:]
+
+				if len(macHistory[ipStr]) >= 3 && !flapAlerted[ipStr] {
+					flapAlerted[ipStr] = true
+					key := "flap:" + ipStr
+					alertIndex[key] = len(alerts)
+					alerts = append(alerts, models.ARPSpoofAlert{
+						IP:        ipStr,
+						OldMAC:    strings.Join(knownMACs, ", "),
+						NewMAC:    macStr,
+						AlertType: "mac_flap",
+						Severity:  "critical",
+						Message:   fmt.Sprintf("MAC changed %d times in 30s for %s", len(macHistory[ipStr]), ipStr),
+						Count:     len(macHistory[ipStr]),
+						FirstSeen: nowStr,
+						Timestamp: nowStr,
+					})
+				}
+			}
+			lastMAC[ipStr] = macStr
 		}
 
 		mu.Unlock()
@@ -129,6 +201,11 @@ func MonitorNDP(ifaceName string, baseline map[string][]string, gatewayIPv6 stri
 	alertIndex := make(map[string]int)
 	var alerts []models.NDPSpoofAlert
 	var mu sync.Mutex
+
+	// MAC flapping detection
+	macHistory := make(map[string][]macEvent)
+	lastMAC := make(map[string]string)
+	flapAlerted := make(map[string]bool)
 
 	deadline := time.Now().Add(duration)
 
@@ -169,11 +246,47 @@ func MonitorNDP(ifaceName string, baseline map[string][]string, gatewayIPv6 stri
 		eth := ethLayer.(*layers.Ethernet)
 
 		ipStr := na.TargetAddress.String()
-		macStr := eth.SrcMAC.String()
+		ethMAC := eth.SrcMAC.String()
 		now := time.Now()
+		nowStr := now.Format("2006-01-02 15:04:05")
+
+		// Extract Target Link-Layer Address from NA options
+		var optionMAC string
+		for _, opt := range na.Options {
+			if opt.Type == layers.ICMPv6OptTargetAddress && len(opt.Data) >= 6 {
+				optionMAC = net.HardwareAddr(opt.Data[:6]).String()
+				break
+			}
+		}
 
 		mu.Lock()
 
+		// 1) MAC mismatch detection: Ethernet src MAC != NA option MAC
+		if optionMAC != "" && ethMAC != optionMAC {
+			key := "mismatch:" + ipStr + ":" + ethMAC + ":" + optionMAC
+			if idx, exists := alertIndex[key]; exists {
+				alerts[idx].Count++
+				alerts[idx].Timestamp = nowStr
+			} else {
+				alertIndex[key] = len(alerts)
+				alerts = append(alerts, models.NDPSpoofAlert{
+					IP:        ipStr,
+					OldMAC:    ethMAC,
+					NewMAC:    optionMAC,
+					AlertType: "mac_mismatch",
+					Severity:  "critical",
+					Message:   fmt.Sprintf("Ethernet src MAC (%s) != NA option MAC (%s)", ethMAC, optionMAC),
+					Count:     1,
+					FirstSeen: nowStr,
+					Timestamp: nowStr,
+				})
+			}
+		}
+
+		// Use Ethernet MAC as the advertised MAC for baseline/flapping checks
+		macStr := ethMAC
+
+		// 2) Baseline MAC change detection (existing "spoof" logic)
 		if knownMACs, ok := baseline[ipStr]; ok {
 			found := false
 			for _, km := range knownMACs {
@@ -183,10 +296,10 @@ func MonitorNDP(ifaceName string, baseline map[string][]string, gatewayIPv6 stri
 				}
 			}
 			if !found {
-				key := ipStr + ":" + macStr
+				key := "spoof:" + ipStr + ":" + macStr
 				if idx, exists := alertIndex[key]; exists {
 					alerts[idx].Count++
-					alerts[idx].Timestamp = now.Format("2006-01-02 15:04:05")
+					alerts[idx].Timestamp = nowStr
 				} else {
 					severity := "warning"
 					if ipStr == gatewayIPv6 {
@@ -200,11 +313,41 @@ func MonitorNDP(ifaceName string, baseline map[string][]string, gatewayIPv6 stri
 						AlertType: "spoof",
 						Severity:  severity,
 						Count:     1,
-						FirstSeen: now.Format("2006-01-02 15:04:05"),
-						Timestamp: now.Format("2006-01-02 15:04:05"),
+						FirstSeen: nowStr,
+						Timestamp: nowStr,
 					})
 				}
 			}
+
+			// 3) MAC flapping detection (only for baseline IPs)
+			if prev, hasPrev := lastMAC[ipStr]; hasPrev && prev != macStr {
+				macHistory[ipStr] = append(macHistory[ipStr], macEvent{mac: macStr, time: now})
+				cutoff := now.Add(-30 * time.Second)
+				events := macHistory[ipStr]
+				start := 0
+				for start < len(events) && events[start].time.Before(cutoff) {
+					start++
+				}
+				macHistory[ipStr] = events[start:]
+
+				if len(macHistory[ipStr]) >= 3 && !flapAlerted[ipStr] {
+					flapAlerted[ipStr] = true
+					key := "flap:" + ipStr
+					alertIndex[key] = len(alerts)
+					alerts = append(alerts, models.NDPSpoofAlert{
+						IP:        ipStr,
+						OldMAC:    strings.Join(knownMACs, ", "),
+						NewMAC:    macStr,
+						AlertType: "mac_flap",
+						Severity:  "critical",
+						Message:   fmt.Sprintf("MAC changed %d times in 30s for %s", len(macHistory[ipStr]), ipStr),
+						Count:     len(macHistory[ipStr]),
+						FirstSeen: nowStr,
+						Timestamp: nowStr,
+					})
+				}
+			}
+			lastMAC[ipStr] = macStr
 		}
 
 		mu.Unlock()

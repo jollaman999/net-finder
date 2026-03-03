@@ -219,6 +219,7 @@ header h1 span { color: var(--primary); }
 }
 .panel { display: none; }
 .panel.active { display: block; }
+#panel-security.active { display: flex; flex-direction: column; }
 .search-box {
   width: 100%;
   max-width: 300px;
@@ -683,7 +684,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
     </div>
 
     <!-- Security Panel -->
-    <div class="panel" id="panel-security" style="display:flex;flex-direction:column">
+    <div class="panel" id="panel-security">
       <div id="section-arp-alerts">
       <h3 style="margin-bottom:12px" data-i18n="h_arp_alerts">ARP Spoofing Alerts</h3>
       <div style="overflow-x:auto">
@@ -691,14 +692,15 @@ tr.subnet-header:hover { background: var(--primary-light); }
         <thead>
           <tr>
             <th onclick="sortTable('arp-alert-table',0)" data-i18n="th_severity">Severity<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',1)" data-i18n="th_target_ip">Target IP<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',2)" data-i18n="th_known_mac">Known MAC<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',3)" data-i18n="th_known_vendor">Known Vendor<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',4)" data-i18n="th_attack_mac">Attacker MAC<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',5)" data-i18n="th_attack_vendor">Attacker Vendor<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',6)" data-i18n="th_packets">Packets<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',7)" data-i18n="th_first_seen">First Seen<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',8)" data-i18n="th_last_seen">Last Seen<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',1)" data-i18n="th_type">Type<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',2)" data-i18n="th_target_ip">Target IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',3)" data-i18n="th_known_mac">Known MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',4)" data-i18n="th_known_vendor">Known Vendor<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',5)" data-i18n="th_attack_mac">Attacker MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',6)" data-i18n="th_attack_vendor">Attacker Vendor<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',7)" data-i18n="th_packets">Packets<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',8)" data-i18n="th_first_seen">First Seen<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',9)" data-i18n="th_last_seen">Last Seen<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -733,14 +735,15 @@ tr.subnet-header:hover { background: var(--primary-light); }
         <thead>
           <tr>
             <th onclick="sortTable('ndp-alert-table',0)" data-i18n="th_severity">Severity<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('ndp-alert-table',1)" data-i18n="th_target_ip">Target IP<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('ndp-alert-table',2)" data-i18n="th_known_mac">Known MAC<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('ndp-alert-table',3)" data-i18n="th_known_vendor">Known Vendor<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('ndp-alert-table',4)" data-i18n="th_attack_mac">Attacker MAC<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('ndp-alert-table',5)" data-i18n="th_attack_vendor">Attacker Vendor<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('ndp-alert-table',6)" data-i18n="th_packets">Packets<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('ndp-alert-table',7)" data-i18n="th_first_seen">First Seen<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('ndp-alert-table',8)" data-i18n="th_last_seen">Last Seen<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',1)" data-i18n="th_type">Type<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',2)" data-i18n="th_target_ip">Target IP<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',3)" data-i18n="th_known_mac">Known MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',4)" data-i18n="th_known_vendor">Known Vendor<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',5)" data-i18n="th_attack_mac">Attacker MAC<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',6)" data-i18n="th_attack_vendor">Attacker Vendor<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',7)" data-i18n="th_packets">Packets<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',8)" data-i18n="th_first_seen">First Seen<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',9)" data-i18n="th_last_seen">Last Seen<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -853,6 +856,9 @@ const i18n = {
     th_type: 'Type',
     th_domain: 'Domain',
     th_message: 'Message',
+    alert_mac_change: 'MAC Change',
+    alert_mac_mismatch: 'MAC Mismatch',
+    alert_mac_flap: 'MAC Flap',
     h_lldp: 'LLDP Neighbors',
     h_cdp: 'CDP Neighbors',
     h_arp_alerts: 'ARP Spoofing Alerts',
@@ -980,6 +986,9 @@ const i18n = {
     th_type: '유형',
     th_domain: '도메인',
     th_message: '메시지',
+    alert_mac_change: 'MAC 변경',
+    alert_mac_mismatch: 'MAC 불일치',
+    alert_mac_flap: 'MAC 플래핑',
     h_lldp: 'LLDP 이웃',
     h_cdp: 'CDP 이웃',
     h_arp_alerts: 'ARP 스푸핑 알림',
@@ -1107,6 +1116,9 @@ const i18n = {
     th_type: '種類',
     th_domain: 'ドメイン',
     th_message: 'メッセージ',
+    alert_mac_change: 'MAC変更',
+    alert_mac_mismatch: 'MAC不一致',
+    alert_mac_flap: 'MACフラッピング',
     h_lldp: 'LLDPネイバー',
     h_cdp: 'CDPネイバー',
     h_arp_alerts: 'ARPスプーフィング警告',
@@ -1234,6 +1246,9 @@ const i18n = {
     th_type: '类型',
     th_domain: '域名',
     th_message: '消息',
+    alert_mac_change: 'MAC变更',
+    alert_mac_mismatch: 'MAC不匹配',
+    alert_mac_flap: 'MAC抖动',
     h_lldp: 'LLDP邻居',
     h_cdp: 'CDP邻居',
     h_arp_alerts: 'ARP欺骗告警',
@@ -1825,9 +1840,17 @@ function renderCDPRow(e) {
   }
   return `<tr><td>${esc(e.deviceID)}</td><td>${addrs.map(esc).join(', ')}</td><td class="mac-cell">${esc((e.sourceMAC||'').toUpperCase())}</td><td>${esc(e.portID)}</td><td>${esc(e.platform)}</td><td>${esc(e.version)}</td><td>${e.nativeVLAN||'-'}</td><td>${esc(e.timestamp)}</td></tr>`;
 }
+function alertTypeLabel(type_) {
+  switch(type_) {
+    case 'mac_mismatch': return t('alert_mac_mismatch');
+    case 'mac_flap': return t('alert_mac_flap');
+    default: return t('alert_mac_change');
+  }
+}
 function renderARPAlertRow(a) {
   const sevClass = a.severity==='critical'?'danger':'warning';
-  return `<tr class="severity-${a.severity}"><td><span class="text-${sevClass}">${a.severity.toUpperCase()}</span></td><td>${esc(a.ip)}</td><td class="mac-cell">${esc(a.oldMAC)}</td><td>${esc(a.oldVendor||'')}</td><td class="mac-cell">${esc(a.newMAC)}</td><td>${esc(a.newVendor||'')}</td><td><strong>${a.count||1}</strong></td><td>${esc(a.firstSeen||a.timestamp)}</td><td>${esc(a.timestamp)}</td></tr>`;
+  const typeClass = (a.alertType==='mac_mismatch'||a.alertType==='mac_flap')?'danger':'warning';
+  return `<tr class="severity-${a.severity}"><td><span class="text-${sevClass}">${a.severity.toUpperCase()}</span></td><td><span class="text-${typeClass}">${esc(alertTypeLabel(a.alertType))}</span></td><td>${esc(a.ip)}</td><td class="mac-cell">${esc(a.oldMAC)}</td><td>${esc(a.oldVendor||'')}</td><td class="mac-cell">${esc(a.newMAC)}</td><td>${esc(a.newVendor||'')}</td><td><strong>${a.count||1}</strong></td><td>${esc(a.firstSeen||a.timestamp)}</td><td>${esc(a.timestamp)}</td></tr>`;
 }
 function renderDNSAlertRow(a) {
   return `<tr class="severity-${a.severity}"><td><span class="text-${a.severity==='critical'?'danger':'warning'}">${a.severity.toUpperCase()}</span></td><td>${esc(a.alertType)}</td><td>${esc(a.domain)}</td><td>${esc(a.message)}</td><td>${esc(a.timestamp)}</td></tr>`;
@@ -1837,7 +1860,8 @@ function renderDHCPv6Row(s) {
 }
 function renderNDPAlertRow(a) {
   const sevClass = a.severity==='critical'?'danger':'warning';
-  return `<tr class="severity-${a.severity}"><td><span class="text-${sevClass}">${a.severity.toUpperCase()}</span></td><td>${esc(a.ip)}</td><td class="mac-cell">${esc(a.oldMAC)}</td><td>${esc(a.oldVendor||'')}</td><td class="mac-cell">${esc(a.newMAC)}</td><td>${esc(a.newVendor||'')}</td><td><strong>${a.count||1}</strong></td><td>${esc(a.firstSeen||a.timestamp)}</td><td>${esc(a.timestamp)}</td></tr>`;
+  const typeClass = (a.alertType==='mac_mismatch'||a.alertType==='mac_flap')?'danger':'warning';
+  return `<tr class="severity-${a.severity}"><td><span class="text-${sevClass}">${a.severity.toUpperCase()}</span></td><td><span class="text-${typeClass}">${esc(alertTypeLabel(a.alertType))}</span></td><td>${esc(a.ip)}</td><td class="mac-cell">${esc(a.oldMAC)}</td><td>${esc(a.oldVendor||'')}</td><td class="mac-cell">${esc(a.newMAC)}</td><td>${esc(a.newVendor||'')}</td><td><strong>${a.count||1}</strong></td><td>${esc(a.firstSeen||a.timestamp)}</td><td>${esc(a.timestamp)}</td></tr>`;
 }
 
 // ── Display mode filter ──

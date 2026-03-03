@@ -512,6 +512,17 @@ func buildHTMLReport(subnet string, conflicts []models.ConflictEntry) string {
 	return b.String()
 }
 
+func alertTypeLabel(t string) string {
+	switch t {
+	case "mac_mismatch":
+		return "MAC Mismatch"
+	case "mac_flap":
+		return "MAC Flap"
+	default:
+		return "MAC Change"
+	}
+}
+
 func htmlEsc(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")
@@ -854,6 +865,7 @@ func buildNDPSecurityHTMLReport(alerts []models.NDPSpoofAlert) string {
 	b.WriteString(`<table style="width:100%;border-collapse:collapse;font-size:14px">`)
 	b.WriteString(`<thead><tr style="background:#f5f5f5">`)
 	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e65100;font-weight:600;white-space:nowrap">Severity</th>`)
+	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e65100;font-weight:600;white-space:nowrap">Type</th>`)
 	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e65100;font-weight:600;white-space:nowrap">Target IP</th>`)
 	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e65100;font-weight:600;white-space:nowrap">Known MAC</th>`)
 	b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e65100;font-weight:600;white-space:nowrap">Known Vendor</th>`)
@@ -870,6 +882,7 @@ func buildNDPSecurityHTMLReport(alerts []models.NDPSpoofAlert) string {
 		}
 		b.WriteString(`<tr style="border-bottom:1px solid #eee">`)
 		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-weight:600;color:%s;white-space:nowrap">%s</td>`, sevColor, htmlEsc(strings.ToUpper(a.Severity))))
+		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;white-space:nowrap">%s</td>`, htmlEsc(alertTypeLabel(a.AlertType))))
 		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-weight:600;white-space:nowrap">%s</td>`, htmlEsc(a.IP)))
 		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-family:'Courier New',monospace;font-size:13px;white-space:nowrap">%s</td>`, htmlEsc(a.OldMAC)))
 		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px">%s</td>`, htmlEsc(a.OldVendor)))
@@ -957,6 +970,7 @@ func buildSecurityHTMLReport(arpAlerts []models.ARPSpoofAlert, dnsAlerts []model
 		b.WriteString(`<table style="width:100%;border-collapse:collapse;font-size:14px">`)
 		b.WriteString(`<thead><tr style="background:#f5f5f5">`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e65100;font-weight:600;white-space:nowrap">Severity</th>`)
+		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e65100;font-weight:600;white-space:nowrap">Type</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e65100;font-weight:600;white-space:nowrap">Target IP</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e65100;font-weight:600;white-space:nowrap">Known MAC</th>`)
 		b.WriteString(`<th style="padding:12px 16px;text-align:left;border-bottom:2px solid #e65100;font-weight:600;white-space:nowrap">Known Vendor</th>`)
@@ -978,6 +992,7 @@ func buildSecurityHTMLReport(arpAlerts []models.ARPSpoofAlert, dnsAlerts []model
 			}
 			b.WriteString(`<tr style="border-bottom:1px solid #eee">`)
 			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-weight:600;color:%s;white-space:nowrap">%s</td>`, sevColor, htmlEsc(strings.ToUpper(a.Severity))))
+			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;white-space:nowrap">%s</td>`, htmlEsc(alertTypeLabel(a.AlertType))))
 			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-weight:600;white-space:nowrap">%s</td>`, htmlEsc(a.IP)))
 			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-family:'Courier New',monospace;font-size:13px;white-space:nowrap">%s</td>`, htmlEsc(a.OldMAC)))
 			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px">%s</td>`, htmlEsc(a.OldVendor)))
