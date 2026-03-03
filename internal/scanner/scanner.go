@@ -1003,6 +1003,9 @@ func (s *Scanner) backgroundARPMonitor() {
 					}
 				}
 			}
+			if len(newConflicts) > 0 {
+				s.state.Conflicts = append(s.state.Conflicts, newConflicts...)
+			}
 			s.state.Mu.Unlock()
 			if s.alertMgr != nil && len(newConflicts) > 0 {
 				go s.alertMgr.SendConflictAlerts(newConflicts)
