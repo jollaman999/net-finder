@@ -683,7 +683,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
     </div>
 
     <!-- Security Panel -->
-    <div class="panel" id="panel-security">
+    <div class="panel" id="panel-security" style="display:flex;flex-direction:column">
       <div id="section-arp-alerts">
       <h3 style="margin-bottom:12px" data-i18n="h_arp_alerts">ARP Spoofing Alerts</h3>
       <div style="overflow-x:auto">
@@ -1505,6 +1505,9 @@ async function pollData() {
     document.getElementById('section-dhcpv6').style.display = showV6 ? '' : 'none';
     document.getElementById('section-arp-alerts').style.display = showV6 ? 'none' : '';
     document.getElementById('section-ndp-alerts').style.display = showV6 ? '' : 'none';
+    document.getElementById('section-arp-alerts').style.order = showV6 ? '2' : '0';
+    document.getElementById('section-ndp-alerts').style.order = showV6 ? '0' : '2';
+    document.getElementById('section-dns-alerts').style.order = '1';
     const visibleDHCP = showV6 ? (dhcpv6||[]) : (dhcp||[]);
     const visibleSecurity = showV6 ? (ndpAlerts||[]) : (arpAlerts||[]);
     renderSimpleTable('dhcp-table', 'empty-dhcp', dhcp, renderDHCPRow);
