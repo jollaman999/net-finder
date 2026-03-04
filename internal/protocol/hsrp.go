@@ -96,11 +96,16 @@ func ListenHSRP(ifaceName string, duration time.Duration, stopCh <-chan struct{}
 func parseHSRPPacket(packet gopacket.Packet) (models.HSRPEntry, bool) {
 	var entry models.HSRPEntry
 
-	// Get source IP (try IPv4 first, then IPv6)
+	// Get source IP and validate destination is HSRP multicast
 	ipLayer := packet.Layer(layers.LayerTypeIPv4)
 	if ipLayer != nil {
 		ip := ipLayer.(*layers.IPv4)
 		entry.SourceIP = ip.SrcIP.String()
+		dst := ip.DstIP.String()
+		// HSRP v1 uses 224.0.0.2, v2 uses 224.0.0.102
+		if dst != "224.0.0.2" && dst != "224.0.0.102" {
+			return entry, false
+		}
 	} else {
 		ip6Layer := packet.Layer(layers.LayerTypeIPv6)
 		if ip6Layer == nil {
@@ -108,6 +113,10 @@ func parseHSRPPacket(packet gopacket.Packet) (models.HSRPEntry, bool) {
 		}
 		ip6 := ip6Layer.(*layers.IPv6)
 		entry.SourceIP = ip6.SrcIP.String()
+		// HSRP v2 over IPv6 uses ff02::66
+		if ip6.DstIP.String() != "ff02::66" {
+			return entry, false
+		}
 	}
 
 	// Get source MAC
@@ -149,6 +158,10 @@ func parseHSRPv1(data []byte, entry models.HSRPEntry) (models.HSRPEntry, bool) {
 	entry.Version = 1
 	// byte 0: version (0x00)
 	// byte 1: opcode (0=Hello, 1=Coup, 2=Resign)
+	opcode := data[1]
+	if opcode > 2 {
+		return entry, false
+	}
 	// byte 2: state
 	state := data[2]
 	if name, ok := hsrpStateNames[state]; ok {
