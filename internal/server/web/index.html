@@ -348,7 +348,8 @@ tr.subnet-header:hover { background: var(--primary-light); }
 .info-card h4 { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
 .info-card .value { font-size: 16px; font-weight: 600; }
 .mac-cell { font-family: 'Courier New', monospace; font-size: 12px; }
-.mac-cell .ml, .vendor-lines .ml { display: block; height: 20px; line-height: 20px; }
+.mv-pair { display: flex; gap: 8px; line-height: 20px; }
+.mv-pair .mv-mac { font-family: 'Courier New', monospace; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
 .alert-badge {
   display: inline-block;
   padding: 2px 8px;
@@ -499,7 +500,8 @@ tr.subnet-header:hover { background: var(--primary-light); }
   .subnet-header td { font-size: 13px; }
   .vendor-subheader td { font-size: 11px; padding: 3px 8px 2px 28px; }
   .mac-cell { font-size: 11px; word-break: break-all; }
-  .mac-cell .ml, .vendor-lines .ml { height: 18px; line-height: 18px; }
+  .mv-pair { line-height: 18px; }
+  .mv-pair .mv-mac { font-size: 11px; }
   .info-grid { grid-template-columns: 1fr; }
   .empty-state { padding: 24px 12px; }
   .empty-state p { font-size: 13px; }
@@ -519,7 +521,8 @@ tr.subnet-header:hover { background: var(--primary-light); }
   .subnet-header td { font-size: 12px; }
   .vendor-subheader td { font-size: 11px; font-weight: 600; padding: 2px 6px 2px 24px; }
   .mac-cell { font-size: 10px; }
-  .mac-cell .ml, .vendor-lines .ml { height: 16px; line-height: 16px; }
+  .mv-pair { line-height: 16px; }
+  .mv-pair .mv-mac { font-size: 10px; }
   .hostname-cell .hn { max-width: 100px; font-size: 10px; }
   .progress-section { padding: 8px; margin: 8px 0; }
   .progress-text { font-size: 12px; }
@@ -594,8 +597,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
             <th onclick="sortTable('hosts-table',0)">#<span class="sort-arrow"></span></th>
             <th onclick="sortTable('hosts-table',1)">IP<span class="sort-arrow"></span></th>
             <th onclick="sortTable('hosts-table',2)" data-i18n="th_hostname">Hostname<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('hosts-table',3)">MAC<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('hosts-table',4)" data-i18n="th_vendor">Vendor<span class="sort-arrow"></span></th>
+            <th colspan="2" onclick="sortTable('hosts-table',3)" data-i18n="th_mac_vendor">MAC / Vendor<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -614,8 +616,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
           <tr>
             <th onclick="sortTable('conflicts-table',0)">IP<span class="sort-arrow"></span></th>
             <th onclick="sortTable('conflicts-table',1)" data-i18n="th_hostname">Hostname<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('conflicts-table',2)" data-i18n="th_mac_addr">MAC Address<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('conflicts-table',3)" data-i18n="th_vendor">Vendor<span class="sort-arrow"></span></th>
+            <th colspan="2" onclick="sortTable('conflicts-table',2)" data-i18n="th_mac_vendor">MAC / Vendor<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -765,13 +766,11 @@ tr.subnet-header:hover { background: var(--primary-light); }
             <th onclick="sortTable('arp-alert-table',0)" data-i18n="th_severity">Severity<span class="sort-arrow"></span></th>
             <th onclick="sortTable('arp-alert-table',1)" data-i18n="th_type">Type<span class="sort-arrow"></span></th>
             <th onclick="sortTable('arp-alert-table',2)" data-i18n="th_target_ip">Target IP<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',3)" data-i18n="th_known_mac">Known MAC<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',4)" data-i18n="th_known_vendor">Known Vendor<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',5)" data-i18n="th_attack_mac">Attacker MAC<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',6)" data-i18n="th_attack_vendor">Attacker Vendor<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',7)" data-i18n="th_packets">Packets<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',8)" data-i18n="th_first_seen">First Seen<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('arp-alert-table',9)" data-i18n="th_last_seen">Last Seen<span class="sort-arrow"></span></th>
+            <th colspan="2" onclick="sortTable('arp-alert-table',3)" data-i18n="th_known_mac_vendor">Known MAC / Vendor<span class="sort-arrow"></span></th>
+            <th colspan="2" onclick="sortTable('arp-alert-table',4)" data-i18n="th_attack_mac_vendor">Attacker MAC / Vendor<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',5)" data-i18n="th_packets">Packets<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',6)" data-i18n="th_first_seen">First Seen<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('arp-alert-table',7)" data-i18n="th_last_seen">Last Seen<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -808,13 +807,11 @@ tr.subnet-header:hover { background: var(--primary-light); }
             <th onclick="sortTable('ndp-alert-table',0)" data-i18n="th_severity">Severity<span class="sort-arrow"></span></th>
             <th onclick="sortTable('ndp-alert-table',1)" data-i18n="th_type">Type<span class="sort-arrow"></span></th>
             <th onclick="sortTable('ndp-alert-table',2)" data-i18n="th_target_ip">Target IP<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('ndp-alert-table',3)" data-i18n="th_known_mac">Known MAC<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('ndp-alert-table',4)" data-i18n="th_known_vendor">Known Vendor<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('ndp-alert-table',5)" data-i18n="th_attack_mac">Attacker MAC<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('ndp-alert-table',6)" data-i18n="th_attack_vendor">Attacker Vendor<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('ndp-alert-table',7)" data-i18n="th_packets">Packets<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('ndp-alert-table',8)" data-i18n="th_first_seen">First Seen<span class="sort-arrow"></span></th>
-            <th onclick="sortTable('ndp-alert-table',9)" data-i18n="th_last_seen">Last Seen<span class="sort-arrow"></span></th>
+            <th colspan="2" onclick="sortTable('ndp-alert-table',3)" data-i18n="th_known_mac_vendor">Known MAC / Vendor<span class="sort-arrow"></span></th>
+            <th colspan="2" onclick="sortTable('ndp-alert-table',4)" data-i18n="th_attack_mac_vendor">Attacker MAC / Vendor<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',5)" data-i18n="th_packets">Packets<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',6)" data-i18n="th_first_seen">First Seen<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('ndp-alert-table',7)" data-i18n="th_last_seen">Last Seen<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -917,10 +914,9 @@ const i18n = {
     th_platform: 'Platform',
     th_severity: 'Severity',
     th_target_ip: 'Target IP',
-    th_known_mac: 'Known MAC',
-    th_attack_mac: 'Attacker MAC',
-    th_known_vendor: 'Known Vendor',
-    th_attack_vendor: 'Attacker Vendor',
+    th_mac_vendor: 'MAC / Vendor',
+    th_known_mac_vendor: 'Known MAC / Vendor',
+    th_attack_mac_vendor: 'Attacker MAC / Vendor',
     th_packets: 'Packets',
     th_first_seen: 'First Seen',
     th_last_seen: 'Last Seen',
@@ -1047,10 +1043,9 @@ const i18n = {
     th_platform: '플랫폼',
     th_severity: '심각도',
     th_target_ip: '대상 IP',
-    th_known_mac: '알려진 MAC',
-    th_attack_mac: '공격 MAC',
-    th_known_vendor: '알려진 벤더',
-    th_attack_vendor: '공격 벤더',
+    th_mac_vendor: 'MAC / 벤더',
+    th_known_mac_vendor: '알려진 MAC / 벤더',
+    th_attack_mac_vendor: '공격 MAC / 벤더',
     th_packets: '패킷 수',
     th_first_seen: '최초 감지',
     th_last_seen: '마지막 감지',
@@ -1177,10 +1172,9 @@ const i18n = {
     th_platform: 'プラットフォーム',
     th_severity: '重大度',
     th_target_ip: '対象IP',
-    th_known_mac: '既知MAC',
-    th_attack_mac: '攻撃MAC',
-    th_known_vendor: '既知ベンダー',
-    th_attack_vendor: '攻撃ベンダー',
+    th_mac_vendor: 'MAC / ベンダー',
+    th_known_mac_vendor: '既知MAC / ベンダー',
+    th_attack_mac_vendor: '攻撃MAC / ベンダー',
     th_packets: 'パケット数',
     th_first_seen: '初回検出',
     th_last_seen: '最終検出',
@@ -1307,10 +1301,9 @@ const i18n = {
     th_platform: '平台',
     th_severity: '严重程度',
     th_target_ip: '目标IP',
-    th_known_mac: '已知MAC',
-    th_attack_mac: '攻击MAC',
-    th_known_vendor: '已知厂商',
-    th_attack_vendor: '攻击厂商',
+    th_mac_vendor: 'MAC / 厂商',
+    th_known_mac_vendor: '已知MAC / 厂商',
+    th_attack_mac_vendor: '攻击MAC / 厂商',
     th_packets: '数据包数',
     th_first_seen: '首次检测',
     th_last_seen: '最后检测',
@@ -1744,7 +1737,7 @@ function toggleSubnetFilter(panelKey, subnet, checked) {
 const expandedHostnames = new Set();
 
 // ── Hosts table (grouped) ──
-const hostsFields = [null, 'ip', 'hostname', 'mac', 'vendor'];
+const hostsFields = [null, 'ip', 'hostname', 'mac'];
 
 function renderHostsTable() {
   const tbody = document.querySelector('#hosts-table tbody');
@@ -1805,46 +1798,40 @@ function renderHostsTable() {
           for (const h of vhosts) {
             idx++;
             const conf = conflictMap[h.ip];
-            let macCell, vendorCell, badge = '', rowClass = '';
+            let mvCell, badge = '', rowClass = '';
             if (conf) {
-              macCell = multiLine(conf.macs||[]);
-              vendorCell = multiLine(conf.vendors||[]);
+              mvCell = mvPairs(conf.macs||[], conf.vendors||[]);
               badge = ' <span class="text-danger" style="font-size:11px;font-weight:600">[Conflicted]</span>';
               rowClass = ' class="severity-critical"';
             } else if (h.isBond && h.bondMACs && h.bondMACs.length > 0) {
-              macCell = multiLine(h.bondMACs);
-              vendorCell = multiLine(h.bondVendors||[]);
+              mvCell = mvPairs(h.bondMACs, h.bondVendors||[]);
               badge = ' <span class="text-cyan" style="font-size:11px;font-weight:600">[Multi-NIC/Bond]</span>';
             } else {
-              macCell = esc(h.mac);
-              vendorCell = esc(h.vendor);
+              mvCell = `<div class="mv-pair"><span class="mv-mac">${esc(h.mac)}</span><span>${esc(h.vendor)}</span></div>`;
             }
             const hnExp = expandedHostnames.has(h.ip) ? ' expanded' : '';
             const hn = esc(h.hostname||'-');
-            html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td class="mac-cell">${macCell}</td><td class="vendor-lines">${vendorCell}</td></tr>`;
+            html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td colspan="2">${mvCell}</td></tr>`;
           }
         }
       } else {
         for (const h of filtered) {
           idx++;
           const conf = conflictMap[h.ip];
-          let macCell, vendorCell, badge = '', rowClass = '';
+          let mvCell, badge = '', rowClass = '';
           if (conf) {
-            macCell = multiLine(conf.macs||[]);
-            vendorCell = multiLine(conf.vendors||[]);
+            mvCell = mvPairs(conf.macs||[], conf.vendors||[]);
             badge = ' <span class="text-danger" style="font-size:11px;font-weight:600">[Conflicted]</span>';
             rowClass = ' class="severity-critical"';
           } else if (h.isBond && h.bondMACs && h.bondMACs.length > 0) {
-            macCell = multiLine(h.bondMACs);
-            vendorCell = multiLine(h.bondVendors||[]);
+            mvCell = mvPairs(h.bondMACs, h.bondVendors||[]);
             badge = ' <span class="text-cyan" style="font-size:11px;font-weight:600">[Multi-NIC/Bond]</span>';
           } else {
-            macCell = esc(h.mac);
-            vendorCell = esc(h.vendor);
+            mvCell = `<div class="mv-pair"><span class="mv-mac">${esc(h.mac)}</span><span>${esc(h.vendor)}</span></div>`;
           }
           const hnExp = expandedHostnames.has(h.ip) ? ' expanded' : '';
           const hn = esc(h.hostname||'-');
-          html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td class="mac-cell">${macCell}</td><td class="vendor-lines">${vendorCell}</td></tr>`;
+          html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td colspan="2">${mvCell}</td></tr>`;
         }
       }
     }
@@ -1854,7 +1841,7 @@ function renderHostsTable() {
 }
 
 // ── Conflicts table (grouped) ──
-const conflictsFields = ['ip', 'hostname', 'macs', 'vendors'];
+const conflictsFields = ['ip', 'hostname', 'macs'];
 
 function renderConflictsTable() {
   const tbody = document.querySelector('#conflicts-table tbody');
@@ -1895,7 +1882,7 @@ function renderConflictsTable() {
       for (const c of filtered) {
         const hnExp = expandedHostnames.has(c.ip) ? ' expanded' : '';
         const hn = esc(c.hostname||'-');
-        html += `<tr class="severity-critical"><td>${esc(c.ip)}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(c.ip)}')" title="${escAttr(c.hostname||'')}">${hn}</span></td><td class="mac-cell">${multiLine(c.macs||[])}</td><td class="vendor-lines">${multiLine(c.vendors||[])}</td></tr>`;
+        html += `<tr class="severity-critical"><td>${esc(c.ip)}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(c.ip)}')" title="${escAttr(c.hostname||'')}">${hn}</span></td><td colspan="2">${mvPairs(c.macs||[], c.vendors||[])}</td></tr>`;
       }
     }
   }
@@ -1978,7 +1965,7 @@ function renderARPAlertRow(a) {
   const typeClass = (a.alertType==='mac_mismatch'||a.alertType==='mac_flap')?'danger':'warning';
   const macs = a.oldMACs||[];
   const vendors = a.oldVendors||[];
-  return `<tr class="severity-${a.severity}"><td><span class="alert-badge badge-${sevClass}">${a.severity.toUpperCase()}</span></td><td><span class="alert-badge badge-${typeClass}">${esc(alertTypeLabel(a.alertType))}</span></td><td>${esc(a.ip)}</td><td class="mac-cell">${multiLine(macs)}</td><td class="vendor-lines">${multiLine(vendors)}</td><td class="mac-cell">${esc(a.newMAC)}</td><td class="vendor-lines">${esc(a.newVendor||'')}</td><td><strong>${a.count||1}</strong></td><td class="datetime-cell">${esc(a.firstSeen||a.timestamp)}</td><td class="datetime-cell">${esc(a.timestamp)}</td></tr>`;
+  return `<tr class="severity-${a.severity}"><td><span class="alert-badge badge-${sevClass}">${a.severity.toUpperCase()}</span></td><td><span class="alert-badge badge-${typeClass}">${esc(alertTypeLabel(a.alertType))}</span></td><td>${esc(a.ip)}</td><td colspan="2">${mvPairs(macs, vendors)}</td><td colspan="2"><div class="mv-pair"><span class="mv-mac">${esc(a.newMAC)}</span><span>${esc(a.newVendor||'')}</span></div></td><td><strong>${a.count||1}</strong></td><td class="datetime-cell">${esc(a.firstSeen||a.timestamp)}</td><td class="datetime-cell">${esc(a.timestamp)}</td></tr>`;
 }
 function renderDNSAlertRow(a) {
   const sevClass = a.severity==='critical'?'danger':'warning';
@@ -1992,7 +1979,7 @@ function renderNDPAlertRow(a) {
   const typeClass = (a.alertType==='mac_mismatch'||a.alertType==='mac_flap')?'danger':'warning';
   const macs = a.oldMACs||[];
   const vendors = a.oldVendors||[];
-  return `<tr class="severity-${a.severity}"><td><span class="alert-badge badge-${sevClass}">${a.severity.toUpperCase()}</span></td><td><span class="alert-badge badge-${typeClass}">${esc(alertTypeLabel(a.alertType))}</span></td><td>${esc(a.ip)}</td><td class="mac-cell">${multiLine(macs)}</td><td class="vendor-lines">${multiLine(vendors)}</td><td class="mac-cell">${esc(a.newMAC)}</td><td class="vendor-lines">${esc(a.newVendor||'')}</td><td><strong>${a.count||1}</strong></td><td class="datetime-cell">${esc(a.firstSeen||a.timestamp)}</td><td class="datetime-cell">${esc(a.timestamp)}</td></tr>`;
+  return `<tr class="severity-${a.severity}"><td><span class="alert-badge badge-${sevClass}">${a.severity.toUpperCase()}</span></td><td><span class="alert-badge badge-${typeClass}">${esc(alertTypeLabel(a.alertType))}</span></td><td>${esc(a.ip)}</td><td colspan="2">${mvPairs(macs, vendors)}</td><td colspan="2"><div class="mv-pair"><span class="mv-mac">${esc(a.newMAC)}</span><span>${esc(a.newVendor||'')}</span></div></td><td><strong>${a.count||1}</strong></td><td class="datetime-cell">${esc(a.firstSeen||a.timestamp)}</td><td class="datetime-cell">${esc(a.timestamp)}</td></tr>`;
 }
 
 // ── Display mode filter ──
@@ -2022,6 +2009,7 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 function multiLine(arr) { return arr.map(s => `<span class="ml">${esc(s)}</span>`).join(''); }
+function mvPairs(macs, vendors) { return macs.map((m, i) => `<div class="mv-pair"><span class="mv-mac">${esc(m)}</span><span>${esc(vendors[i]||'')}</span></div>`).join(''); }
 function escAttr(s) {
   return esc(s).replace(/'/g,'&#39;');
 }
