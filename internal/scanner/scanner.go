@@ -987,13 +987,17 @@ func (s *Scanner) backgroundARPMonitor() {
 				}
 				if !merged {
 					a.Subnet = s.findSubnet(net.ParseIP(a.IP))
-					a.OldVendor = s.lookupVendor(a.OldMAC)
+					for _, m := range a.OldMACs {
+						a.OldVendors = append(a.OldVendors, s.lookupVendor(m))
+					}
 					a.NewVendor = s.lookupVendor(a.NewMAC)
+					conflictMACs := append(append([]string{}, a.OldMACs...), a.NewMAC)
+					conflictVendors := append(append([]string{}, a.OldVendors...), a.NewVendor)
 					s.state.ARPAlerts = append(s.state.ARPAlerts, a)
 					s.state.Conflicts = append(s.state.Conflicts, models.ConflictEntry{
 						IP:      a.IP,
-						MACs:    []string{a.OldMAC, a.NewMAC},
-						Vendors: []string{a.OldVendor, a.NewVendor},
+						MACs:    conflictMACs,
+						Vendors: conflictVendors,
 						Subnet:  a.Subnet,
 					})
 					if !s.emailedARPKeys[key] {
@@ -1175,7 +1179,9 @@ func (s *Scanner) backgroundNDPMonitor() {
 					}
 				}
 				if !merged {
-					a.OldVendor = s.lookupVendor(a.OldMAC)
+					for _, m := range a.OldMACs {
+						a.OldVendors = append(a.OldVendors, s.lookupVendor(m))
+					}
 					a.NewVendor = s.lookupVendor(a.NewMAC)
 					s.state.NDPAlerts = append(s.state.NDPAlerts, a)
 					if !s.emailedNDPKeys[key] {

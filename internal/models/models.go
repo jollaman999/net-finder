@@ -102,11 +102,13 @@ type DHCPv6ServerInfo struct {
 
 // NDPSpoofAlert represents an NDP spoofing alert
 type NDPSpoofAlert struct {
-	IP        string `json:"ip"`
-	OldMAC    string `json:"oldMAC"`
-	NewMAC    string `json:"newMAC"`
-	OldVendor string `json:"oldVendor,omitempty"`
-	NewVendor string `json:"newVendor,omitempty"`
+	IP         string   `json:"ip"`
+	OldMAC     string   `json:"oldMAC,omitempty"`
+	NewMAC     string   `json:"newMAC"`
+	OldVendor  string   `json:"oldVendor,omitempty"`
+	NewVendor  string   `json:"newVendor,omitempty"`
+	OldMACs    []string `json:"oldMACs,omitempty"`
+	OldVendors []string `json:"oldVendors,omitempty"`
 	AlertType string `json:"alertType"`
 	Severity  string `json:"severity"`
 	Message   string `json:"message"`
@@ -173,11 +175,13 @@ type HostnameEntry struct {
 
 // ARPSpoofAlert represents an ARP spoofing alert
 type ARPSpoofAlert struct {
-	IP        string `json:"ip"`
-	OldMAC    string `json:"oldMAC"`
-	NewMAC    string `json:"newMAC"`
-	OldVendor string `json:"oldVendor,omitempty"`
-	NewVendor string `json:"newVendor,omitempty"`
+	IP         string   `json:"ip"`
+	OldMAC     string   `json:"oldMAC,omitempty"`
+	NewMAC     string   `json:"newMAC"`
+	OldVendor  string   `json:"oldVendor,omitempty"`
+	NewVendor  string   `json:"newVendor,omitempty"`
+	OldMACs    []string `json:"oldMACs,omitempty"`
+	OldVendors []string `json:"oldVendors,omitempty"`
 	AlertType string `json:"alertType"`
 	Severity  string `json:"severity"`
 	Message   string `json:"message"`

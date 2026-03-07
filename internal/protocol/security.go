@@ -135,9 +135,11 @@ func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string
 						severity = "critical"
 					}
 					alertIndex[key] = len(alerts)
+					macsCopy := make([]string, len(knownMACs))
+					copy(macsCopy, knownMACs)
 					alerts = append(alerts, models.ARPSpoofAlert{
 						IP:        ipStr,
-						OldMAC:    strings.Join(knownMACs, ", "),
+						OldMACs:   macsCopy,
 						NewMAC:    macStr,
 						AlertType: "spoof",
 						Severity:  severity,
@@ -164,9 +166,11 @@ func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string
 					flapAlerted[ipStr] = true
 					key := "flap:" + ipStr
 					alertIndex[key] = len(alerts)
+					flapMACs := make([]string, len(knownMACs))
+					copy(flapMACs, knownMACs)
 					alerts = append(alerts, models.ARPSpoofAlert{
 						IP:        ipStr,
-						OldMAC:    strings.Join(knownMACs, ", "),
+						OldMACs:   flapMACs,
 						NewMAC:    macStr,
 						AlertType: "mac_flap",
 						Severity:  "critical",
@@ -306,9 +310,11 @@ func MonitorNDP(ifaceName string, baseline map[string][]string, gatewayIPv6 stri
 						severity = "critical"
 					}
 					alertIndex[key] = len(alerts)
+					ndpMACsCopy := make([]string, len(knownMACs))
+					copy(ndpMACsCopy, knownMACs)
 					alerts = append(alerts, models.NDPSpoofAlert{
 						IP:        ipStr,
-						OldMAC:    strings.Join(knownMACs, ", "),
+						OldMACs:   ndpMACsCopy,
 						NewMAC:    macStr,
 						AlertType: "spoof",
 						Severity:  severity,
@@ -333,10 +339,12 @@ func MonitorNDP(ifaceName string, baseline map[string][]string, gatewayIPv6 stri
 				if len(macHistory[ipStr]) >= 3 && !flapAlerted[ipStr] {
 					flapAlerted[ipStr] = true
 					key := "flap:" + ipStr
+					ndpFlapMACs := make([]string, len(knownMACs))
+					copy(ndpFlapMACs, knownMACs)
 					alertIndex[key] = len(alerts)
 					alerts = append(alerts, models.NDPSpoofAlert{
 						IP:        ipStr,
-						OldMAC:    strings.Join(knownMACs, ", "),
+						OldMACs:   ndpFlapMACs,
 						NewMAC:    macStr,
 						AlertType: "mac_flap",
 						Severity:  "critical",

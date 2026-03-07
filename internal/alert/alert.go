@@ -351,7 +351,7 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 		var dnsAlerts []models.DNSSpoofAlert
 		if hasEventV4(cfg, "arp_spoofing") {
 			arpAlerts = []models.ARPSpoofAlert{
-				{IP: "192.168.1.1", OldMAC: "AA:BB:CC:DD:EE:01", NewMAC: "FF:FF:FF:00:11:22", OldVendor: "Cisco Systems", NewVendor: "Unknown", AlertType: "gateway_mac_change", Severity: "critical", Message: "Gateway 192.168.1.1 MAC changed", Count: 5, FirstSeen: time.Now().Add(-2 * time.Minute).Format("15:04:05"), Timestamp: time.Now().Format("15:04:05"), Subnet: "192.168.1.0/24"},
+				{IP: "192.168.1.1", OldMACs: []string{"AA:BB:CC:DD:EE:01"}, NewMAC: "FF:FF:FF:00:11:22", OldVendors: []string{"Cisco Systems"}, NewVendor: "Unknown", AlertType: "gateway_mac_change", Severity: "critical", Message: "Gateway 192.168.1.1 MAC changed", Count: 5, FirstSeen: time.Now().Add(-2 * time.Minute).Format("15:04:05"), Timestamp: time.Now().Format("15:04:05"), Subnet: "192.168.1.0/24"},
 			}
 		}
 		if hasEventV4(cfg, "dns_spoofing") || hasEventV6(cfg, "dns_spoofing") {
@@ -370,7 +370,7 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 
 	if hasEventV6(cfg, "ndp_spoofing") {
 		testNDP := []models.NDPSpoofAlert{
-			{IP: "fe80::1", OldMAC: "AA:BB:CC:DD:EE:01", NewMAC: "FF:FF:FF:00:11:22", OldVendor: "Cisco Systems", NewVendor: "Unknown", AlertType: "spoof", Severity: "critical", Count: 3, FirstSeen: time.Now().Add(-1 * time.Minute).Format("15:04:05"), Timestamp: time.Now().Format("15:04:05")},
+			{IP: "fe80::1", OldMACs: []string{"AA:BB:CC:DD:EE:01"}, NewMAC: "FF:FF:FF:00:11:22", OldVendors: []string{"Cisco Systems"}, NewVendor: "Unknown", AlertType: "spoof", Severity: "critical", Count: 3, FirstSeen: time.Now().Add(-1 * time.Minute).Format("15:04:05"), Timestamp: time.Now().Format("15:04:05")},
 		}
 		subject := fmt.Sprintf("[Net Finder] NDP Spoofing Alert (%d)", len(testNDP))
 		body := buildNDPSecurityHTMLReport(testNDP)
@@ -529,6 +529,14 @@ func htmlEsc(s string) string {
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	s = strings.ReplaceAll(s, `"`, "&quot;")
 	return s
+}
+
+func mapSlice(ss []string, fn func(string) string) []string {
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = fn(s)
+	}
+	return out
 }
 
 func macsToHTML(macs []string) []string {
@@ -884,8 +892,12 @@ func buildNDPSecurityHTMLReport(alerts []models.NDPSpoofAlert) string {
 		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-weight:600;color:%s;white-space:nowrap">%s</td>`, sevColor, htmlEsc(strings.ToUpper(a.Severity))))
 		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;white-space:nowrap">%s</td>`, htmlEsc(alertTypeLabel(a.AlertType))))
 		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-weight:600;white-space:nowrap">%s</td>`, htmlEsc(a.IP)))
-		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-family:'Courier New',monospace;font-size:13px;white-space:nowrap">%s</td>`, htmlEsc(a.OldMAC)))
-		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px">%s</td>`, htmlEsc(a.OldVendor)))
+		b.WriteString(`<td style="padding:14px 16px;font-family:'Courier New',monospace;font-size:13px">`)
+		b.WriteString(strings.Join(mapSlice(a.OldMACs, htmlEsc), "<br>"))
+		b.WriteString(`</td>`)
+		b.WriteString(`<td style="padding:14px 16px">`)
+		b.WriteString(strings.Join(mapSlice(a.OldVendors, htmlEsc), "<br>"))
+		b.WriteString(`</td>`)
 		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-family:'Courier New',monospace;font-size:13px;white-space:nowrap">%s</td>`, htmlEsc(a.NewMAC)))
 		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px">%s</td>`, htmlEsc(a.NewVendor)))
 		b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;text-align:center;font-weight:600">%d</td>`, a.Count))
@@ -994,8 +1006,12 @@ func buildSecurityHTMLReport(arpAlerts []models.ARPSpoofAlert, dnsAlerts []model
 			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-weight:600;color:%s;white-space:nowrap">%s</td>`, sevColor, htmlEsc(strings.ToUpper(a.Severity))))
 			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;white-space:nowrap">%s</td>`, htmlEsc(alertTypeLabel(a.AlertType))))
 			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-weight:600;white-space:nowrap">%s</td>`, htmlEsc(a.IP)))
-			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-family:'Courier New',monospace;font-size:13px;white-space:nowrap">%s</td>`, htmlEsc(a.OldMAC)))
-			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px">%s</td>`, htmlEsc(a.OldVendor)))
+			b.WriteString(`<td style="padding:14px 16px;font-family:'Courier New',monospace;font-size:13px">`)
+			b.WriteString(strings.Join(mapSlice(a.OldMACs, htmlEsc), "<br>"))
+			b.WriteString(`</td>`)
+			b.WriteString(`<td style="padding:14px 16px">`)
+			b.WriteString(strings.Join(mapSlice(a.OldVendors, htmlEsc), "<br>"))
+			b.WriteString(`</td>`)
 			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;font-family:'Courier New',monospace;font-size:13px;white-space:nowrap">%s</td>`, htmlEsc(a.NewMAC)))
 			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px">%s</td>`, htmlEsc(a.NewVendor)))
 			b.WriteString(fmt.Sprintf(`<td style="padding:14px 16px;text-align:center;font-weight:600">%d</td>`, a.Count))
