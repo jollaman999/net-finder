@@ -511,13 +511,6 @@ func (s *Scanner) run() {
 		return
 	}
 
-	// Resolve notes (HTTP title etc.) for hosts without hostname
-	s.resolveNotes()
-
-	if s.stopped() {
-		return
-	}
-
 	s.setProgress("scan_done", 100, 0)
 	s.state.Mu.Lock()
 	s.state.Status = "done"
@@ -531,6 +524,9 @@ func (s *Scanner) run() {
 	if s.ipMode != models.IPModeIPv4 {
 		go s.backgroundNDPMonitor()
 	}
+
+	// Background note resolution (full port scan → HTTP title)
+	go s.backgroundResolveNotes()
 }
 
 // processARPResults converts ARPResult into Hosts and Conflicts
@@ -781,12 +777,13 @@ func (s *Scanner) resolveHostnames() {
 	s.state.Mu.Unlock()
 }
 
-// resolveNotes resolves supplementary notes (HTTP title, etc.) for hosts without a hostname.
-func (s *Scanner) resolveNotes() {
+// backgroundResolveNotes runs a full port scan + HTTP title probe in background.
+// Results are applied incrementally as they are discovered.
+func (s *Scanner) backgroundResolveNotes() {
 	s.state.Mu.RLock()
 	var ips []string
 	for _, h := range s.state.Hosts {
-		if h.Hostname == "" && h.Note == "" {
+		if h.Note == "" {
 			ips = append(ips, h.IP)
 		}
 	}
@@ -796,18 +793,16 @@ func (s *Scanner) resolveNotes() {
 		return
 	}
 
-	notes := hostname.ResolveNotes(ips)
-	if len(notes) == 0 {
-		return
-	}
-
-	s.state.Mu.Lock()
-	for i := range s.state.Hosts {
-		if note, ok := notes[s.state.Hosts[i].IP]; ok {
-			s.state.Hosts[i].Note = note
+	hostname.ResolveNotesStream(ips, s.bgStopCh, func(ip, note string) {
+		s.state.Mu.Lock()
+		for i := range s.state.Hosts {
+			if s.state.Hosts[i].IP == ip {
+				s.state.Hosts[i].Note = note
+				break
+			}
 		}
-	}
-	s.state.Mu.Unlock()
+		s.state.Mu.Unlock()
+	})
 }
 
 // arpForHostnames does a quick ARP scan to get IPv4→MAC mappings for hostname resolution.

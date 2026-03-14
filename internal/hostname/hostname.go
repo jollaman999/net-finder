@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -86,16 +87,18 @@ func ResolveHostnames(ips []string) []models.HostnameEntry {
 	return results
 }
 
-// ResolveNotes resolves supplementary info (HTTP title) for hosts that lack a hostname.
-func ResolveNotes(ips []string) map[string]string {
+// ResolveNotesStream scans all TCP ports on each IP, probes HTTP on open ports,
+// and calls onResult incrementally as results are found.
+// maxConns limits total concurrent TCP connections across all hosts.
+func ResolveNotesStream(ips []string, stopCh <-chan struct{}, onResult func(ip, note string)) {
 	if len(ips) == 0 {
-		return nil
+		return
 	}
 
-	var mu sync.Mutex
-	notes := make(map[string]string)
+	const maxConns = 500
+	sem := make(chan struct{}, maxConns)
 
-	workers := 20
+	workers := 10
 	if len(ips) < workers {
 		workers = len(ips)
 	}
@@ -108,22 +111,27 @@ func ResolveNotes(ips []string) map[string]string {
 		go func() {
 			defer wg.Done()
 			for ip := range ch {
-				if note := resolveHTTP(ip); note != "" {
-					mu.Lock()
-					notes[ip] = note
-					mu.Unlock()
+				select {
+				case <-stopCh:
+					return
+				default:
+				}
+				if note := resolveHTTP(ip, sem, stopCh); note != "" {
+					onResult(ip, note)
 				}
 			}
 		}()
 	}
 
 	for _, ip := range ips {
-		ch <- ip
+		select {
+		case <-stopCh:
+			break
+		case ch <- ip:
+		}
 	}
 	close(ch)
 	wg.Wait()
-
-	return notes
 }
 
 // resolveDNSPTR performs a reverse DNS lookup
@@ -666,108 +674,131 @@ func resolveSMTP(ip string) string {
 	return hostname
 }
 
-// Common web service ports to probe
-var webPorts = []string{
-	"443", "80", "8443", "8080", "8000", "8888", "8006",
-	"3000", "5000", "9090", "9443", "4443", "7443",
-}
-
-// tlsPorts are ports that typically use TLS
-var tlsPorts = map[string]bool{
-	"443": true, "8443": true, "9443": true, "4443": true, "7443": true,
-}
-
-// resolveHTTP probes common web ports and extracts title from HTTP responses.
-// Returns "title (:port)" or empty string.
-func resolveHTTP(ip string) string {
-	// Phase 1: find open web ports (parallel quick TCP connect)
-	type portResult struct {
-		port string
-		open bool
-	}
-	results := make(chan portResult, len(webPorts))
-	for _, p := range webPorts {
-		go func(port string) {
-			conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 500*time.Millisecond)
-			if err != nil {
-				results <- portResult{port, false}
-				return
-			}
-			conn.Close()
-			results <- portResult{port, true}
-		}(p)
-	}
-
-	var openPorts []string
-	for range webPorts {
-		r := <-results
-		if r.open {
-			openPorts = append(openPorts, r.port)
-		}
-	}
+// resolveHTTP scans all TCP ports on an IP, then probes HTTP on open ports.
+// sem limits total concurrent connections. Returns "title (:port)" or empty string.
+func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
+	// Phase 1: full port scan with batched concurrency
+	openPorts := scanAllPorts(ip, sem, stopCh)
 	if len(openPorts) == 0 {
 		return ""
 	}
 
-	// Phase 2: try HTTP on open ports (prefer TLS ports first)
-	sorted := make([]string, 0, len(openPorts))
-	for _, p := range openPorts {
-		if tlsPorts[p] {
-			sorted = append([]string{p}, sorted...)
-		} else {
-			sorted = append(sorted, p)
+	// Phase 2: probe HTTP on all open ports, collect results
+	var httpResults, httpsResults []webProbeResult
+	for _, port := range openPorts {
+		select {
+		case <-stopCh:
+			return ""
+		default:
 		}
-	}
-
-	for _, port := range sorted {
-		if title := tryHTTP(ip, port); title != "" {
-			return fmt.Sprintf("%s (:%s)", title, port)
-		}
-	}
-
-	// No title found, but report open web ports
-	return ""
-}
-
-// tryHTTP attempts an HTTP(S) request and extracts the <title>
-func tryHTTP(ip, port string) string {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 500*time.Millisecond)
-	if err != nil {
-		return ""
-	}
-
-	useTLS := tlsPorts[port]
-	// Also try TLS if plain HTTP fails
-	if !useTLS {
-		// Quick TLS probe: try TLS first, fall back to plain
-		tlsConn := tls.Client(conn, &tls.Config{InsecureSkipVerify: true})
-		tlsConn.SetDeadline(time.Now().Add(1 * time.Second))
-		if err := tlsConn.Handshake(); err == nil {
-			useTLS = true
-			conn = tlsConn
-		} else {
-			tlsConn.Close()
-			// Reconnect for plain HTTP
-			conn, err = net.DialTimeout("tcp", net.JoinHostPort(ip, port), 500*time.Millisecond)
-			if err != nil {
-				return ""
+		if r := tryHTTP(ip, port); r != nil {
+			if r.isTLS {
+				httpsResults = append(httpsResults, *r)
+			} else {
+				httpResults = append(httpResults, *r)
 			}
 		}
-	} else {
-		tlsConn := tls.Client(conn, &tls.Config{InsecureSkipVerify: true})
-		tlsConn.SetDeadline(time.Now().Add(2 * time.Second))
-		if err := tlsConn.Handshake(); err != nil {
-			conn.Close()
-			return ""
+	}
+
+	// Format: HTTP entries first, then HTTPS
+	var parts []string
+	for _, r := range httpResults {
+		parts = append(parts, fmt.Sprintf("http:%s (:%s)", r.title, r.port))
+	}
+	for _, r := range httpsResults {
+		parts = append(parts, fmt.Sprintf("https:%s (:%s)", r.title, r.port))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " | ")
+}
+
+// scanAllPorts scans all 65535 TCP ports and returns open port numbers as strings.
+func scanAllPorts(ip string, sem chan struct{}, stopCh <-chan struct{}) []string {
+	type result struct {
+		port int
+		open bool
+	}
+
+	results := make(chan result, 1024)
+	var wg sync.WaitGroup
+
+	for port := 1; port <= 65535; port++ {
+		select {
+		case <-stopCh:
+			go func() { wg.Wait(); close(results) }()
+			// drain
+			for range results {
+			}
+			return nil
+		case sem <- struct{}{}:
 		}
+
+		wg.Add(1)
+		go func(p int) {
+			defer func() { <-sem; wg.Done() }()
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, p), 200*time.Millisecond)
+			if err != nil {
+				return
+			}
+			conn.Close()
+			results <- result{p, true}
+		}(port)
+	}
+
+	go func() { wg.Wait(); close(results) }()
+
+	var ports []int
+	for r := range results {
+		if r.open {
+			ports = append(ports, r.port)
+		}
+	}
+
+	sort.Ints(ports)
+	out := make([]string, len(ports))
+	for i, p := range ports {
+		out[i] = fmt.Sprintf("%d", p)
+	}
+	return out
+}
+
+// webProbeResult holds the result of probing a single port
+type webProbeResult struct {
+	port   string
+	title  string
+	isTLS  bool
+}
+
+// tryHTTP attempts an HTTP(S) request on a port and returns title + TLS status.
+func tryHTTP(ip, port string) *webProbeResult {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 500*time.Millisecond)
+	if err != nil {
+		return nil
+	}
+
+	// Try TLS first, fall back to plain HTTP
+	isTLS := false
+	tlsConn := tls.Client(conn, &tls.Config{InsecureSkipVerify: true})
+	tlsConn.SetDeadline(time.Now().Add(1 * time.Second))
+	if err := tlsConn.Handshake(); err == nil {
+		isTLS = true
 		conn = tlsConn
+	} else {
+		tlsConn.Close()
+		// Reconnect for plain HTTP
+		conn, err = net.DialTimeout("tcp", net.JoinHostPort(ip, port), 500*time.Millisecond)
+		if err != nil {
+			return nil
+		}
 	}
 
 	conn.SetDeadline(time.Now().Add(2 * time.Second))
 	req := fmt.Sprintf("GET / HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", ip)
 	if _, err := conn.Write([]byte(req)); err != nil {
 		conn.Close()
-		return ""
+		return nil
 	}
 
 	buf := make([]byte, 4096)
@@ -775,36 +806,36 @@ func tryHTTP(ip, port string) string {
 	conn.Close()
 
 	if n == 0 {
-		return ""
+		return nil
 	}
 	body := string(buf[:n])
 
 	// Only use 200 OK responses (skip redirects, errors, etc.)
 	if !strings.HasPrefix(body, "HTTP/1.0 200") && !strings.HasPrefix(body, "HTTP/1.1 200") {
-		return ""
+		return nil
 	}
 
 	// Extract <title>...</title>
 	lower := strings.ToLower(body)
 	start := strings.Index(lower, "<title>")
 	if start == -1 {
-		return ""
+		return nil
 	}
 	start += 7
 	end := strings.Index(lower[start:], "</title>")
 	if end == -1 {
-		return ""
+		return nil
 	}
 	title := html.UnescapeString(strings.TrimSpace(body[start : start+end]))
 	if title == "" || title == ip {
-		return ""
+		return nil
 	}
 	// Skip generic/useless titles
 	tl := strings.ToLower(title)
 	if tl == "document" || tl == "untitled" || strings.Contains(tl, "welcome") || strings.Contains(tl, "index of") {
-		return ""
+		return nil
 	}
-	return title
+	return &webProbeResult{port: port, title: title, isTLS: isTLS}
 }
 
 // buildIPv6ArpaName converts an IPv6 address to its ip6.arpa reverse DNS name.
