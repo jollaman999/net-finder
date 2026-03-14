@@ -661,6 +661,11 @@ func resolveHTTP(ip string) string {
 		}
 		body := string(buf[:n])
 
+		// Only use 200 OK responses (skip redirects, errors, etc.)
+		if !strings.HasPrefix(body, "HTTP/1.0 200") && !strings.HasPrefix(body, "HTTP/1.1 200") {
+			continue
+		}
+
 		// Extract <title>...</title>
 		lower := strings.ToLower(body)
 		start := strings.Index(lower, "<title>")
