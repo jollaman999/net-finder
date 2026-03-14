@@ -679,15 +679,15 @@ func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
 	// Format: HTTP entries first, then HTTPS
 	var parts []string
 	for _, r := range httpResults {
-		parts = append(parts, fmt.Sprintf("http:%s (:%s)", r.title, r.port))
+		parts = append(parts, fmt.Sprintf("HTTP %s (%s)", r.title, r.port))
 	}
 	for _, r := range httpsResults {
-		parts = append(parts, fmt.Sprintf("https:%s (:%s)", r.title, r.port))
+		parts = append(parts, fmt.Sprintf("HTTPS %s (%s)", r.title, r.port))
 	}
 	if len(parts) == 0 {
 		return ""
 	}
-	return strings.Join(parts, " | ")
+	return strings.Join(parts, "\n")
 }
 
 // Common web service ports to probe
