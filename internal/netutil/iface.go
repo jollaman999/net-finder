@@ -144,7 +144,7 @@ func GroupMACsByDevice(macs []net.HardwareAddr) [][]net.HardwareAddr {
 			prev[0] == cur[0] && prev[1] == cur[1] && prev[2] == cur[2] &&
 			prev[3] == cur[3] && prev[4] == cur[4] {
 			diff := int(cur[5]) - int(prev[5])
-			consecutive = diff >= 1 && diff <= 7
+			consecutive = diff >= 0 && diff <= 7
 		}
 
 		if consecutive {
