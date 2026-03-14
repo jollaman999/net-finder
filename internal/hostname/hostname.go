@@ -654,7 +654,7 @@ func resolveSMTP(ip string) string {
 // sem limits total concurrent connections. Returns "title (:port)" or empty string.
 func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
 	// Phase 1: full port scan with batched concurrency
-	openPorts := scanAllPorts(ip, sem, stopCh)
+	openPorts := scanWebPorts(ip, sem, stopCh)
 	if len(openPorts) == 0 {
 		return ""
 	}
@@ -690,23 +690,28 @@ func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
 	return strings.Join(parts, " | ")
 }
 
-// scanAllPorts scans all 65535 TCP ports and returns open port numbers as strings.
-func scanAllPorts(ip string, sem chan struct{}, stopCh <-chan struct{}) []string {
+// Common web service ports to probe
+var webPorts = []int{
+	80, 443, 8080, 8443, 8000, 8888, 8006, 8008, 8081, 8082,
+	3000, 5000, 5601, 7443, 7080, 9090, 9443, 9200, 9000,
+	8161, 8181, 8280, 8880, 10000, 10443,
+	2082, 2083, 2086, 2087, 4443, 4848, 6080,
+	8834, 9080, 18080, 18443,
+}
+
+// scanWebPorts scans common web ports and returns open ones as strings.
+func scanWebPorts(ip string, sem chan struct{}, stopCh <-chan struct{}) []string {
 	type result struct {
 		port int
-		open bool
 	}
 
-	results := make(chan result, 1024)
+	results := make(chan result, len(webPorts))
 	var wg sync.WaitGroup
 
-	for port := 1; port <= 65535; port++ {
+	for _, port := range webPorts {
 		select {
 		case <-stopCh:
-			go func() { wg.Wait(); close(results) }()
-			// drain
-			for range results {
-			}
+			wg.Wait()
 			return nil
 		case sem <- struct{}{}:
 		}
@@ -714,22 +719,21 @@ func scanAllPorts(ip string, sem chan struct{}, stopCh <-chan struct{}) []string
 		wg.Add(1)
 		go func(p int) {
 			defer func() { <-sem; wg.Done() }()
-			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, p), 200*time.Millisecond)
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, p), 3*time.Second)
 			if err != nil {
 				return
 			}
 			conn.Close()
-			results <- result{p, true}
+			results <- result{p}
 		}(port)
 	}
 
-	go func() { wg.Wait(); close(results) }()
+	wg.Wait()
+	close(results)
 
 	var ports []int
 	for r := range results {
-		if r.open {
-			ports = append(ports, r.port)
-		}
+		ports = append(ports, r.port)
 	}
 
 	sort.Ints(ports)
@@ -749,7 +753,7 @@ type webProbeResult struct {
 
 // tryHTTP attempts an HTTP(S) request on a port and returns title + TLS status.
 func tryHTTP(ip, port string) *webProbeResult {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 500*time.Millisecond)
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 3*time.Second)
 	if err != nil {
 		return nil
 	}
@@ -757,20 +761,20 @@ func tryHTTP(ip, port string) *webProbeResult {
 	// Try TLS first, fall back to plain HTTP
 	isTLS := false
 	tlsConn := tls.Client(conn, &tls.Config{InsecureSkipVerify: true})
-	tlsConn.SetDeadline(time.Now().Add(1 * time.Second))
+	tlsConn.SetDeadline(time.Now().Add(3 * time.Second))
 	if err := tlsConn.Handshake(); err == nil {
 		isTLS = true
 		conn = tlsConn
 	} else {
 		tlsConn.Close()
 		// Reconnect for plain HTTP
-		conn, err = net.DialTimeout("tcp", net.JoinHostPort(ip, port), 500*time.Millisecond)
+		conn, err = net.DialTimeout("tcp", net.JoinHostPort(ip, port), 3*time.Second)
 		if err != nil {
 			return nil
 		}
 	}
 
-	conn.SetDeadline(time.Now().Add(2 * time.Second))
+	conn.SetDeadline(time.Now().Add(3 * time.Second))
 	req := fmt.Sprintf("GET / HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", ip)
 	if _, err := conn.Write([]byte(req)); err != nil {
 		conn.Close()
