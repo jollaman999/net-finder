@@ -597,7 +597,8 @@ tr.subnet-header:hover { background: var(--primary-light); }
             <th onclick="sortTable('hosts-table',0)">#<span class="sort-arrow"></span></th>
             <th onclick="sortTable('hosts-table',1)">IP<span class="sort-arrow"></span></th>
             <th onclick="sortTable('hosts-table',2)" data-i18n="th_hostname">Hostname<span class="sort-arrow"></span></th>
-            <th colspan="2" onclick="sortTable('hosts-table',3)" data-i18n="th_mac_vendor">MAC / Vendor<span class="sort-arrow"></span></th>
+            <th onclick="sortTable('hosts-table',3)">Note<span class="sort-arrow"></span></th>
+            <th colspan="2" onclick="sortTable('hosts-table',4)" data-i18n="th_mac_vendor">MAC / Vendor<span class="sort-arrow"></span></th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -1751,7 +1752,7 @@ function toggleSubnetFilter(panelKey, subnet, checked) {
 const expandedHostnames = new Set();
 
 // ── Hosts table (grouped) ──
-const hostsFields = [null, 'ip', 'hostname', 'mac'];
+const hostsFields = [null, 'ip', 'hostname', 'note', 'mac'];
 
 function renderHostsTable() {
   const tbody = document.querySelector('#hosts-table tbody');
@@ -1762,7 +1763,7 @@ function renderHostsTable() {
   const sort = activeSort['hosts-table'];
   const filter = (activeFilter['hosts-table'] || '').toLowerCase();
   const { groups, order } = groupBySubnet(rawHosts);
-  const cols = 5;
+  const cols = 6;
   let html = '';
   let idx = 0;
 
@@ -1779,7 +1780,7 @@ function renderHostsTable() {
 
     // Filter
     const filtered = filter
-      ? items.filter(h => `${h.ip} ${h.hostname||''} ${h.mac} ${h.vendor} ${(h.bondMACs||[]).join(' ')} ${(h.bondVendors||[]).join(' ')}`.toLowerCase().includes(filter))
+      ? items.filter(h => `${h.ip} ${h.hostname||''} ${h.note||''} ${h.mac} ${h.vendor} ${(h.bondMACs||[]).join(' ')} ${(h.bondVendors||[]).join(' ')}`.toLowerCase().includes(filter))
       : items;
     if (filter && filtered.length === 0) continue;
 
@@ -1825,7 +1826,8 @@ function renderHostsTable() {
             }
             const hnExp = expandedHostnames.has(h.ip) ? ' expanded' : '';
             const hn = esc(h.hostname||'-');
-            html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td colspan="2">${mvCell}</td></tr>`;
+            const nt = esc(h.note||'');
+            html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td class="hostname-cell${hnExp}" title="${escAttr(h.note||'')}">${nt}</td><td colspan="2">${mvCell}</td></tr>`;
           }
         }
       } else {
@@ -1845,7 +1847,8 @@ function renderHostsTable() {
           }
           const hnExp = expandedHostnames.has(h.ip) ? ' expanded' : '';
           const hn = esc(h.hostname||'-');
-          html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td colspan="2">${mvCell}</td></tr>`;
+          const nt = esc(h.note||'');
+          html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td class="hostname-cell${hnExp}" title="${escAttr(h.note||'')}">${nt}</td><td colspan="2">${mvCell}</td></tr>`;
         }
       }
     }

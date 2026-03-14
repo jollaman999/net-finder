@@ -511,6 +511,13 @@ func (s *Scanner) run() {
 		return
 	}
 
+	// Resolve notes (HTTP title etc.) for hosts without hostname
+	s.resolveNotes()
+
+	if s.stopped() {
+		return
+	}
+
 	s.setProgress("scan_done", 100, 0)
 	s.state.Mu.Lock()
 	s.state.Status = "done"
@@ -771,6 +778,35 @@ func (s *Scanner) resolveHostnames() {
 		s.state.Hostnames = append(s.state.Hostnames, models.HostnameEntry{IP: ip, Hostname: hn})
 	}
 	s.hostnameMu.RUnlock()
+	s.state.Mu.Unlock()
+}
+
+// resolveNotes resolves supplementary notes (HTTP title, etc.) for hosts without a hostname.
+func (s *Scanner) resolveNotes() {
+	s.state.Mu.RLock()
+	var ips []string
+	for _, h := range s.state.Hosts {
+		if h.Hostname == "" && h.Note == "" {
+			ips = append(ips, h.IP)
+		}
+	}
+	s.state.Mu.RUnlock()
+
+	if len(ips) == 0 {
+		return
+	}
+
+	notes := hostname.ResolveNotes(ips)
+	if len(notes) == 0 {
+		return
+	}
+
+	s.state.Mu.Lock()
+	for i := range s.state.Hosts {
+		if note, ok := notes[s.state.Hosts[i].IP]; ok {
+			s.state.Hosts[i].Note = note
+		}
+	}
 	s.state.Mu.Unlock()
 }
 

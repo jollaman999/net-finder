@@ -38,6 +38,7 @@ type ProgressInfo struct {
 type HostEntry struct {
 	IP          string   `json:"ip"`
 	Hostname    string   `json:"hostname"`
+	Note        string   `json:"note,omitempty"`
 	MAC         string   `json:"mac"`
 	Vendor      string   `json:"vendor"`
 	Subnet      string   `json:"subnet"`

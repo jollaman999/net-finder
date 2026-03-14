@@ -60,9 +60,6 @@ func ResolveHostnames(ips []string) []models.HostnameEntry {
 					hostname = resolveTLS(ip)
 				}
 				if hostname == "" {
-					hostname = resolveHTTP(ip)
-				}
-				if hostname == "" {
 					hostname = resolveSMTP(ip)
 				}
 
@@ -86,6 +83,46 @@ func ResolveHostnames(ips []string) []models.HostnameEntry {
 		results = append(results, models.HostnameEntry{IP: ip, Hostname: hostname})
 	}
 	return results
+}
+
+// ResolveNotes resolves supplementary info (HTTP title) for hosts that lack a hostname.
+func ResolveNotes(ips []string) map[string]string {
+	if len(ips) == 0 {
+		return nil
+	}
+
+	var mu sync.Mutex
+	notes := make(map[string]string)
+
+	workers := 20
+	if len(ips) < workers {
+		workers = len(ips)
+	}
+
+	ch := make(chan string, len(ips))
+	var wg sync.WaitGroup
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for ip := range ch {
+				if note := resolveHTTP(ip); note != "" {
+					mu.Lock()
+					notes[ip] = note
+					mu.Unlock()
+				}
+			}
+		}()
+	}
+
+	for _, ip := range ips {
+		ch <- ip
+	}
+	close(ch)
+	wg.Wait()
+
+	return notes
 }
 
 // resolveDNSPTR performs a reverse DNS lookup
