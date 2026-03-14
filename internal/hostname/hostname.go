@@ -680,18 +680,26 @@ func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
 		}
 	}
 
-	// Format: HTTP entries first, then HTTPS
-	var parts []string
-	for _, r := range httpResults {
-		parts = append(parts, fmt.Sprintf("HTTP %s (%s)", r.title, r.port))
+	// Format: "HTTP name (port), name (port)\nHTTPS name (port), name (port)"
+	var lines []string
+	if len(httpResults) > 0 {
+		var items []string
+		for _, r := range httpResults {
+			items = append(items, fmt.Sprintf("%s (%s)", r.title, r.port))
+		}
+		lines = append(lines, "HTTP\t"+strings.Join(items, ", "))
 	}
-	for _, r := range httpsResults {
-		parts = append(parts, fmt.Sprintf("HTTPS %s (%s)", r.title, r.port))
+	if len(httpsResults) > 0 {
+		var items []string
+		for _, r := range httpsResults {
+			items = append(items, fmt.Sprintf("%s (%s)", r.title, r.port))
+		}
+		lines = append(lines, "HTTPS\t"+strings.Join(items, ", "))
 	}
-	if len(parts) == 0 {
+	if len(lines) == 0 {
 		return ""
 	}
-	return strings.Join(parts, "\n")
+	return strings.Join(lines, "\n")
 }
 
 // Default web service ports to probe
@@ -835,32 +843,84 @@ func tryHTTP(ip, port string) *webProbeResult {
 	}
 	body := string(buf[:n])
 
-	// Only use 200 OK responses (skip redirects, errors, etc.)
-	if !strings.HasPrefix(body, "HTTP/1.0 200") && !strings.HasPrefix(body, "HTTP/1.1 200") {
+	// Must be an HTTP response
+	if !strings.HasPrefix(body, "HTTP/") {
 		return nil
 	}
 
-	// Extract <title>...</title>
-	lower := strings.ToLower(body)
-	start := strings.Index(lower, "<title>")
-	if start == -1 {
-		return nil
+	// Try to extract <title>...</title> from 200 OK responses
+	if strings.Contains(body, " 200 ") {
+		lower := strings.ToLower(body)
+		start := strings.Index(lower, "<title>")
+		if start != -1 {
+			start += 7
+			end := strings.Index(lower[start:], "</title>")
+			if end != -1 {
+				title := html.UnescapeString(strings.TrimSpace(body[start : start+end]))
+				if title != "" && title != ip {
+					tl := strings.ToLower(title)
+					if tl != "document" && tl != "untitled" && !strings.Contains(tl, "welcome") && !strings.Contains(tl, "index of") {
+						return &webProbeResult{port: port, title: title, isTLS: isTLS}
+					}
+				}
+			}
+		}
 	}
-	start += 7
-	end := strings.Index(lower[start:], "</title>")
-	if end == -1 {
-		return nil
+
+	// Fallback: identify service from HTTP headers
+	if name := identifyService(body); name != "" {
+		return &webProbeResult{port: port, title: name, isTLS: isTLS}
 	}
-	title := html.UnescapeString(strings.TrimSpace(body[start : start+end]))
-	if title == "" || title == ip {
-		return nil
+	return nil
+}
+
+// identifyService extracts service name from HTTP response headers.
+func identifyService(response string) string {
+	// Split headers from body
+	headerEnd := strings.Index(response, "\r\n\r\n")
+	if headerEnd == -1 {
+		headerEnd = len(response)
 	}
-	// Skip generic/useless titles
-	tl := strings.ToLower(title)
-	if tl == "document" || tl == "untitled" || strings.Contains(tl, "welcome") || strings.Contains(tl, "index of") {
-		return nil
+	headers := response[:headerEnd]
+
+	// Known header patterns → service name
+	knownHeaders := []struct {
+		header string
+		prefix string
+	}{
+		{"X-Influxdb-Version:", "InfluxDB"},
+		{"X-Jenkins:", "Jenkins"},
+		{"X-Grafana-Version:", "Grafana"},
+		{"X-Vhost:", ""},
 	}
-	return &webProbeResult{port: port, title: title, isTLS: isTLS}
+	for _, kh := range knownHeaders {
+		idx := strings.Index(strings.ToLower(headers), strings.ToLower(kh.header))
+		if idx == -1 {
+			continue
+		}
+		line := headers[idx:]
+		if nl := strings.IndexAny(line, "\r\n"); nl != -1 {
+			line = line[:nl]
+		}
+		val := strings.TrimSpace(line[len(kh.header):])
+		if kh.prefix != "" {
+			return fmt.Sprintf("%s %s", kh.prefix, val)
+		}
+		return val
+	}
+
+	// Server header
+	for _, line := range strings.Split(headers, "\r\n") {
+		if strings.HasPrefix(strings.ToLower(line), "server:") {
+			val := strings.TrimSpace(line[7:])
+			if val != "" && !strings.Contains(strings.ToLower(val), "apache") &&
+				!strings.Contains(strings.ToLower(val), "nginx") {
+				return val
+			}
+		}
+	}
+
+	return ""
 }
 
 // buildIPv6ArpaName converts an IPv6 address to its ip6.arpa reverse DNS name.
