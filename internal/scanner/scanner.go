@@ -994,12 +994,22 @@ func (s *Scanner) backgroundARPMonitor() {
 					conflictMACs := append(append([]string{}, a.OldMACs...), a.NewMAC)
 					conflictVendors := append(append([]string{}, a.OldVendors...), a.NewVendor)
 					s.state.ARPAlerts = append(s.state.ARPAlerts, a)
-					s.state.Conflicts = append(s.state.Conflicts, models.ConflictEntry{
-						IP:      a.IP,
-						MACs:    conflictMACs,
-						Vendors: conflictVendors,
-						Subnet:  a.Subnet,
-					})
+					// Skip conflict if all MACs are identical (duplicate ARP replies, not real conflict)
+					allSame := true
+					for _, m := range conflictMACs {
+						if m != conflictMACs[0] {
+							allSame = false
+							break
+						}
+					}
+					if !allSame {
+						s.state.Conflicts = append(s.state.Conflicts, models.ConflictEntry{
+							IP:      a.IP,
+							MACs:    conflictMACs,
+							Vendors: conflictVendors,
+							Subnet:  a.Subnet,
+						})
+					}
 					if !s.emailedARPKeys[key] {
 						s.emailedARPKeys[key] = true
 						newARPAlerts = append(newARPAlerts, a)
