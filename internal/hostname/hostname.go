@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
+	"html"
 	"net"
 	"strings"
 	"sync"
@@ -714,7 +715,7 @@ func resolveHTTP(ip string) string {
 		if end == -1 {
 			continue
 		}
-		title := strings.TrimSpace(body[start : start+end])
+		title := html.UnescapeString(strings.TrimSpace(body[start : start+end]))
 		if title == "" || title == ip {
 			continue
 		}
