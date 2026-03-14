@@ -87,9 +87,9 @@ func ResolveHostnames(ips []string) []models.HostnameEntry {
 	return results
 }
 
-// ResolveNotesStream scans all TCP ports on each IP, probes HTTP on open ports,
+// ResolveNotesStream scans all TCP ports on each IP sequentially, probes HTTP on open ports,
 // and calls onResult incrementally as results are found.
-// maxConns limits total concurrent TCP connections across all hosts.
+// Concurrency is controlled by a semaphore limiting total simultaneous TCP connections.
 func ResolveNotesStream(ips []string, stopCh <-chan struct{}, onResult func(ip, note string)) {
 	if len(ips) == 0 {
 		return
@@ -98,40 +98,16 @@ func ResolveNotesStream(ips []string, stopCh <-chan struct{}, onResult func(ip, 
 	const maxConns = 500
 	sem := make(chan struct{}, maxConns)
 
-	workers := 10
-	if len(ips) < workers {
-		workers = len(ips)
-	}
-
-	ch := make(chan string, len(ips))
-	var wg sync.WaitGroup
-
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for ip := range ch {
-				select {
-				case <-stopCh:
-					return
-				default:
-				}
-				if note := resolveHTTP(ip, sem, stopCh); note != "" {
-					onResult(ip, note)
-				}
-			}
-		}()
-	}
-
 	for _, ip := range ips {
 		select {
 		case <-stopCh:
-			break
-		case ch <- ip:
+			return
+		default:
+		}
+		if note := resolveHTTP(ip, sem, stopCh); note != "" {
+			onResult(ip, note)
 		}
 	}
-	close(ch)
-	wg.Wait()
 }
 
 // resolveDNSPTR performs a reverse DNS lookup
