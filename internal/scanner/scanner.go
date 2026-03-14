@@ -704,7 +704,26 @@ func (s *Scanner) resolveHostnames() {
 		s.hostnameMu.Unlock()
 	}
 
+	// Collect hostnames from LLDP SysName / CDP DeviceID by MAC
+	s.state.Mu.RLock()
+	macProtoName := make(map[string]string)
+	for _, e := range s.state.LLDPNeighbors {
+		if e.SysName != "" && e.SourceMAC != "" {
+			macProtoName[strings.ToUpper(e.SourceMAC)] = e.SysName
+		}
+	}
+	for _, e := range s.state.CDPNeighbors {
+		if e.DeviceID != "" && e.SourceMAC != "" {
+			mac := strings.ToUpper(e.SourceMAC)
+			if _, exists := macProtoName[mac]; !exists {
+				macProtoName[mac] = e.DeviceID
+			}
+		}
+	}
+	s.state.Mu.RUnlock()
+
 	// Share hostnames across hosts with same MAC (IPv4 ↔ IPv6)
+	// Also fill from LLDP/CDP names
 	s.hostnameMu.Lock()
 	macHostname := make(map[string]string)
 	// First pass: collect known hostnames per MAC
@@ -714,6 +733,12 @@ func (s *Scanner) resolveHostnames() {
 			if mac != "" {
 				macHostname[mac] = hn
 			}
+		}
+	}
+	// Merge LLDP/CDP names (don't override existing hostnames)
+	for mac, name := range macProtoName {
+		if _, exists := macHostname[mac]; !exists {
+			macHostname[mac] = name
 		}
 	}
 	// Second pass: fill missing hostnames from MAC match

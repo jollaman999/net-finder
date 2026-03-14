@@ -20,7 +20,8 @@ import (
 // 3. mDNS (UDP 5353) - Linux (Avahi) / macOS hosts
 // 4. SNMP sysName (UDP 161) - network devices / servers with SNMP
 // 5. TLS Certificate CN/SAN (TCP 443) - HTTPS servers, ESXi, etc.
-// 6. SMTP Banner (TCP 25) - mail servers
+// 6. HTTP title (TCP 443/80) - web management pages
+// 7. SMTP Banner (TCP 25) - mail servers
 func ResolveHostnames(ips []string) []models.HostnameEntry {
 	if len(ips) == 0 {
 		return nil
@@ -57,6 +58,9 @@ func ResolveHostnames(ips []string) []models.HostnameEntry {
 				}
 				if hostname == "" {
 					hostname = resolveTLS(ip)
+				}
+				if hostname == "" {
+					hostname = resolveHTTP(ip)
 				}
 				if hostname == "" {
 					hostname = resolveSMTP(ip)
@@ -622,6 +626,64 @@ func resolveSMTP(ip string) string {
 	}
 
 	return hostname
+}
+
+// resolveHTTP connects to port 80/443 and extracts hostname from HTML <title>
+func resolveHTTP(ip string) string {
+	for _, port := range []string{"443", "80"} {
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 500*time.Millisecond)
+		if err != nil {
+			continue
+		}
+
+		if port == "443" {
+			conn = tls.Client(conn, &tls.Config{InsecureSkipVerify: true})
+			conn.(*tls.Conn).SetDeadline(time.Now().Add(2 * time.Second))
+			if err := conn.(*tls.Conn).Handshake(); err != nil {
+				conn.Close()
+				continue
+			}
+		}
+
+		conn.SetDeadline(time.Now().Add(2 * time.Second))
+		req := fmt.Sprintf("GET / HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", ip)
+		if _, err := conn.Write([]byte(req)); err != nil {
+			conn.Close()
+			continue
+		}
+
+		buf := make([]byte, 4096)
+		n, _ := conn.Read(buf)
+		conn.Close()
+
+		if n == 0 {
+			continue
+		}
+		body := string(buf[:n])
+
+		// Extract <title>...</title>
+		lower := strings.ToLower(body)
+		start := strings.Index(lower, "<title>")
+		if start == -1 {
+			continue
+		}
+		start += 7
+		end := strings.Index(lower[start:], "</title>")
+		if end == -1 {
+			continue
+		}
+		title := strings.TrimSpace(body[start : start+end])
+		if title == "" || title == ip {
+			continue
+		}
+		// Skip generic/useless titles
+		tl := strings.ToLower(title)
+		if tl == "document" || tl == "untitled" || strings.Contains(tl, "welcome") || strings.Contains(tl, "index of") {
+			continue
+		}
+		return title
+	}
+	return ""
 }
 
 // buildIPv6ArpaName converts an IPv6 address to its ip6.arpa reverse DNS name.
