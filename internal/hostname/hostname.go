@@ -709,6 +709,8 @@ var defaultWebPorts = []int{
 	8086, 8087, 8161, 8181, 8280, 8880, 9999, 10000, 10443,
 	2082, 2083, 2086, 2087, 4443, 4848, 6080,
 	8834, 9080, 18080, 18443,
+	2375, 2376, 4194, 5984, 8200, 8500, 8300, 9090,
+	15672, 2379, 6443, 9093, 9100,
 }
 
 // webPorts is the active port list (overridden by config file)
@@ -874,27 +876,45 @@ func tryHTTP(ip, port string) *webProbeResult {
 	return nil
 }
 
-// identifyService extracts service name from HTTP response headers.
+// identifyService extracts service name from HTTP response headers and body.
 func identifyService(response string) string {
 	// Split headers from body
 	headerEnd := strings.Index(response, "\r\n\r\n")
-	if headerEnd == -1 {
-		headerEnd = len(response)
+	var headers, body string
+	if headerEnd != -1 {
+		headers = response[:headerEnd]
+		body = response[headerEnd+4:]
+	} else {
+		headers = response
 	}
-	headers := response[:headerEnd]
+	headersLower := strings.ToLower(headers)
 
 	// Known header patterns → service name
 	knownHeaders := []struct {
-		header string
+		header string // lowercase
 		prefix string
 	}{
-		{"X-Influxdb-Version:", "InfluxDB"},
-		{"X-Jenkins:", "Jenkins"},
-		{"X-Grafana-Version:", "Grafana"},
-		{"X-Vhost:", ""},
+		{"x-influxdb-version:", "InfluxDB"},
+		{"x-jenkins:", "Jenkins"},
+		{"x-grafana-version:", "Grafana"},
+		{"x-elastic-product:", ""},
+		{"kbn-name:", ""},
+		{"x-consul-index:", "Consul"},
+		{"x-vault-token:", "Vault"},
+		{"x-couchdb-body-time:", "CouchDB"},
+		{"x-proxmox-api-version:", "Proxmox"},
+		{"x-gitlab-meta:", "GitLab"},
+		{"x-gitea-version:", "Gitea"},
+		{"x-harbor-csrf-token:", "Harbor"},
+		{"x-rancher-version:", "Rancher"},
+		{"x-portainer-version:", "Portainer"},
+		{"x-sonarqube-version:", "SonarQube"},
+		{"x-redmine-api-version:", "Redmine"},
+		{"x-nexus-ui:", "Nexus"},
+		{"x-zabbix-version:", "Zabbix"},
 	}
 	for _, kh := range knownHeaders {
-		idx := strings.Index(strings.ToLower(headers), strings.ToLower(kh.header))
+		idx := strings.Index(headersLower, kh.header)
 		if idx == -1 {
 			continue
 		}
@@ -904,20 +924,122 @@ func identifyService(response string) string {
 		}
 		val := strings.TrimSpace(line[len(kh.header):])
 		if kh.prefix != "" {
-			return fmt.Sprintf("%s %s", kh.prefix, val)
+			if val != "" {
+				return fmt.Sprintf("%s %s", kh.prefix, val)
+			}
+			return kh.prefix
 		}
-		return val
+		if val != "" {
+			return val
+		}
 	}
 
-	// Server header
+	// Server header — use for non-generic servers
+	genericServers := []string{"apache", "nginx", "httpd", "lighttpd", "openresty", "gunicorn", "python"}
 	for _, line := range strings.Split(headers, "\r\n") {
 		if strings.HasPrefix(strings.ToLower(line), "server:") {
 			val := strings.TrimSpace(line[7:])
-			if val != "" && !strings.Contains(strings.ToLower(val), "apache") &&
-				!strings.Contains(strings.ToLower(val), "nginx") {
+			if val == "" {
+				continue
+			}
+			vl := strings.ToLower(val)
+			isGeneric := false
+			for _, g := range genericServers {
+				if strings.Contains(vl, g) {
+					isGeneric = true
+					break
+				}
+			}
+			if !isGeneric {
 				return val
 			}
 		}
+	}
+
+	// JSON body detection for REST API services
+	body = strings.TrimSpace(body)
+	if len(body) > 0 && body[0] == '{' {
+		return identifyFromJSON(body)
+	}
+
+	return ""
+}
+
+// identifyFromJSON tries to identify a service from a JSON response body.
+func identifyFromJSON(body string) string {
+	// Quick key extraction without full JSON parsing
+	get := func(key string) string {
+		pattern := fmt.Sprintf(`"%s"`, key)
+		idx := strings.Index(body, pattern)
+		if idx == -1 {
+			return ""
+		}
+		rest := body[idx+len(pattern):]
+		// skip :" or : "
+		rest = strings.TrimLeft(rest, ": \t")
+		if len(rest) == 0 {
+			return ""
+		}
+		if rest[0] == '"' {
+			end := strings.Index(rest[1:], `"`)
+			if end == -1 {
+				return ""
+			}
+			return rest[1 : end+1]
+		}
+		// numeric or boolean value
+		end := strings.IndexAny(rest, ",}\r\n ")
+		if end == -1 {
+			return rest
+		}
+		return rest[:end]
+	}
+
+	// Elasticsearch: {"name":"...","cluster_name":"...","version":{"number":"..."}}
+	if cn := get("cluster_name"); cn != "" {
+		if ver := get("number"); ver != "" {
+			return fmt.Sprintf("Elasticsearch %s (%s)", ver, cn)
+		}
+		return fmt.Sprintf("Elasticsearch (%s)", cn)
+	}
+
+	// CouchDB: {"couchdb":"Welcome","version":"..."}
+	if get("couchdb") != "" {
+		if ver := get("version"); ver != "" {
+			return fmt.Sprintf("CouchDB %s", ver)
+		}
+		return "CouchDB"
+	}
+
+	// Consul: {"consul_version":"..."}
+	if ver := get("consul_version"); ver != "" {
+		return fmt.Sprintf("Consul %s", ver)
+	}
+
+	// Docker Registry: {"repositories":[...]} — from /v2/_catalog
+	// Docker daemon: {"ApiVersion":"...","Version":"..."}
+	if ver := get("ApiVersion"); ver != "" {
+		if dv := get("Version"); dv != "" {
+			return fmt.Sprintf("Docker %s", dv)
+		}
+	}
+
+	// Prometheus: {"status":"...","data":{"version":"..."}}
+	if get("status") == "success" {
+		if ver := get("version"); ver != "" {
+			return fmt.Sprintf("Prometheus %s", ver)
+		}
+	}
+
+	// Minio: {"status":"..."}  — already caught by Server header usually
+	// RabbitMQ management: {"rabbitmq_version":"..."}
+	if ver := get("rabbitmq_version"); ver != "" {
+		return fmt.Sprintf("RabbitMQ %s", ver)
+	}
+
+	// etcd: {"etcdserver":"...","etcdcluster":"..."}
+	if ver := get("etcdserver"); ver != "" {
+		return fmt.Sprintf("etcd %s", ver)
 	}
 
 	return ""
