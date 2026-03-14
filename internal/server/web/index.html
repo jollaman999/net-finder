@@ -1459,6 +1459,9 @@ let macToIP = {};
 // IP→conflict lookup (built from rawConflicts each poll)
 let conflictMap = {};
 
+// Previous poll snapshot for skip-render optimization
+let prevPollJSON = '';
+
 // Collapse state per table: Set of collapsed subnet strings
 const collapsed = { hosts: new Set(), conflicts: new Set(), vendors: new Set() };
 
@@ -1532,6 +1535,11 @@ async function pollData() {
       fetchJSON('/api/dhcpv6'),
       fetchJSON('/api/security/ndp')
     ]);
+
+    // Skip re-render if data hasn't changed (preserves text selection / drag)
+    const pollJSON = JSON.stringify([hosts, conflicts, dhcp, hsrp, vrrp, lldp, cdp, arpAlerts, dnsAlerts, dhcpv6, ndpAlerts, displayMode]);
+    if (pollJSON === prevPollJSON) return;
+    prevPollJSON = pollJSON;
 
     const allHosts = hosts || [];
     const allConflicts = conflicts || [];
