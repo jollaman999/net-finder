@@ -205,7 +205,26 @@ func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, su
 	result.Mu.Unlock()
 
 	if len(finalMissing) > 0 {
-		icmpFallbackScan(iface, localIP, localMAC, subnets, finalMissing, result)
+		// Collect known gateway MACs to exclude from ICMP fallback results.
+		// When a host doesn't respond to ARP directly, the ICMP reply arrives
+		// via the gateway, so the Ethernet source MAC is the gateway's MAC,
+		// not the actual host's MAC.
+		gwMACs := make(map[string]bool)
+		result.Mu.Lock()
+		for _, sn := range subnets {
+			for _, gwSuffix := range []byte{1, 254} {
+				gwIP := make(net.IP, 4)
+				copy(gwIP, sn.IP.To4())
+				gwIP[3] = gwSuffix
+				if macs, ok := result.Entries[gwIP.String()]; ok {
+					for _, m := range macs {
+						gwMACs[m.String()] = true
+					}
+				}
+			}
+		}
+		result.Mu.Unlock()
+		icmpFallbackScan(iface, localIP, localMAC, subnets, finalMissing, result, gwMACs)
 	}
 
 	return result, nil
@@ -297,7 +316,7 @@ func readARPResponses(sock *netutil.RawSocket, result *ARPResult, done <-chan st
 
 // icmpFallbackScan sends ICMP echo requests to hosts that didn't respond to ARP
 // and captures any resulting traffic in promiscuous mode to extract their MACs.
-func icmpFallbackScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, subnets []*net.IPNet, missing []net.IP, result *ARPResult) {
+func icmpFallbackScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, subnets []*net.IPNet, missing []net.IP, result *ARPResult, gwMACs map[string]bool) {
 	if len(missing) == 0 {
 		return
 	}
@@ -367,6 +386,9 @@ func icmpFallbackScan(iface *net.Interface, localIP net.IP, localMAC net.Hardwar
 				if missingSet[srcIP.String()] {
 					srcMAC := make(net.HardwareAddr, 6)
 					copy(srcMAC, data[6:12])
+					if gwMACs[srcMAC.String()] {
+						continue
+					}
 					result.Add(srcIP, srcMAC)
 					delete(missingSet, srcIP.String())
 				}
@@ -379,6 +401,9 @@ func icmpFallbackScan(iface *net.Interface, localIP net.IP, localMAC net.Hardwar
 				if missingSet[senderIP.String()] {
 					senderMAC := make(net.HardwareAddr, 6)
 					copy(senderMAC, data[22:28])
+					if gwMACs[senderMAC.String()] {
+						continue
+					}
 					result.Add(senderIP, senderMAC)
 					delete(missingSet, senderIP.String())
 				}
