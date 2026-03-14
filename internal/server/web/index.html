@@ -1459,8 +1459,19 @@ let macToIP = {};
 // IP→conflict lookup (built from rawConflicts each poll)
 let conflictMap = {};
 
-// Previous poll snapshot for skip-render optimization
-let prevPollJSON = '';
+// Previous render HTML per element for skip-render optimization
+const prevHTML = {};
+function setHTML(el, html) {
+  const key = el.id || el.tagName;
+  if (prevHTML[key] === html) return;
+  // Defer update if user has active text selection inside this element
+  const sel = window.getSelection();
+  if (sel && sel.type === 'Range' && sel.anchorNode && el.contains(sel.anchorNode)) {
+    return;
+  }
+  prevHTML[key] = html;
+  el.innerHTML = html;
+}
 
 // Collapse state per table: Set of collapsed subnet strings
 const collapsed = { hosts: new Set(), conflicts: new Set(), vendors: new Set() };
@@ -1535,11 +1546,6 @@ async function pollData() {
       fetchJSON('/api/dhcpv6'),
       fetchJSON('/api/security/ndp')
     ]);
-
-    // Skip re-render if data hasn't changed (preserves text selection / drag)
-    const pollJSON = JSON.stringify([hosts, conflicts, dhcp, hsrp, vrrp, lldp, cdp, arpAlerts, dnsAlerts, dhcpv6, ndpAlerts, displayMode]);
-    if (pollJSON === prevPollJSON) return;
-    prevPollJSON = pollJSON;
 
     const allHosts = hosts || [];
     const allConflicts = conflicts || [];
@@ -1680,7 +1686,7 @@ function updateSubnetSets(panelKey, subnets) {
 function renderSubnetFilter(panelKey, subnets) {
   const container = document.getElementById('subnet-filter-' + panelKey);
   if (!container) return;
-  if (subnets.length === 0) { container.innerHTML = ''; return; }
+  if (subnets.length === 0) { setHTML(container, ''); return; }
 
   const enabled = enabledSubnets[panelKey];
   const allChecked = subnets.every(s => enabled.has(s));
@@ -1709,7 +1715,7 @@ function renderSubnetFilter(panelKey, subnets) {
   } else {
     renderCbs(subnets);
   }
-  container.innerHTML = html;
+  setHTML(container, html);
 
   // Set indeterminate state for "All" checkbox
   const allCb = document.getElementById('sf-all-' + panelKey);
@@ -1750,7 +1756,7 @@ const hostsFields = [null, 'ip', 'hostname', 'mac'];
 function renderHostsTable() {
   const tbody = document.querySelector('#hosts-table tbody');
   const empty = document.getElementById('empty-hosts');
-  if (rawHosts.length === 0) { tbody.innerHTML = ''; empty.style.display = ''; return; }
+  if (rawHosts.length === 0) { setHTML(tbody, ''); empty.style.display = ''; return; }
   empty.style.display = 'none';
 
   const sort = activeSort['hosts-table'];
@@ -1844,7 +1850,7 @@ function renderHostsTable() {
       }
     }
   }
-  tbody.innerHTML = html;
+  setHTML(tbody, html);
   updateSortArrows('hosts-table');
 }
 
@@ -1854,7 +1860,7 @@ const conflictsFields = ['ip', 'hostname', 'macs'];
 function renderConflictsTable() {
   const tbody = document.querySelector('#conflicts-table tbody');
   const empty = document.getElementById('empty-conflicts');
-  if (rawConflicts.length === 0) { tbody.innerHTML = ''; empty.style.display = ''; return; }
+  if (rawConflicts.length === 0) { setHTML(tbody, ''); empty.style.display = ''; return; }
   empty.style.display = 'none';
 
   const sort = activeSort['conflicts-table'];
@@ -1894,7 +1900,7 @@ function renderConflictsTable() {
       }
     }
   }
-  tbody.innerHTML = html;
+  setHTML(tbody, html);
   updateSortArrows('conflicts-table');
 }
 
@@ -1914,7 +1920,7 @@ function toggleVendorGroup(key) {
 function renderSimpleTable(tableId, emptyId, data, rowFn) {
   const tbody = document.querySelector('#' + tableId + ' tbody');
   const empty = document.getElementById(emptyId);
-  if (!data || data.length === 0) { tbody.innerHTML = ''; empty.style.display = ''; return; }
+  if (!data || data.length === 0) { setHTML(tbody, ''); empty.style.display = ''; return; }
   empty.style.display = 'none';
 
   const sort = activeSort[tableId];
@@ -1926,7 +1932,7 @@ function renderSimpleTable(tableId, emptyId, data, rowFn) {
       return fieldCompare(va, vb, sort.asc);
     });
   }
-  tbody.innerHTML = rows.map(rowFn).join('');
+  setHTML(tbody, rows.map(rowFn).join(''));
 }
 
 function rowToText(html, colIdx) {
@@ -1995,6 +2001,7 @@ function isIPv6(ip) { return ip && ip.indexOf(':') !== -1; }
 function setDisplayMode(mode) {
   displayMode = mode;
   document.getElementById('viewSelect').value = mode;
+  Object.keys(prevHTML).forEach(k => delete prevHTML[k]);
   pollData();
 }
 
