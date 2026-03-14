@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"net-finder/internal/alert"
+	"net-finder/internal/hostname"
 	"net-finder/internal/models"
 	"net-finder/internal/netutil"
 	"net-finder/internal/protocol"
@@ -133,6 +134,9 @@ func main() {
 		log.Printf("IPv6 link-local: %s", linkLocalIPv6)
 	}
 	log.Printf("Subnets: %s", strings.Join(subnetStrs, ", "))
+
+	// Load custom web ports config
+	hostname.LoadWebPorts()
 
 	// Initialize alert manager and scanner
 	alertMgr := alert.NewAlertManager()
