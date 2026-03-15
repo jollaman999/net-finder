@@ -2017,6 +2017,7 @@ function setDisplayMode(mode) {
   displayMode = mode;
   document.getElementById('viewSelect').value = mode;
   Object.keys(prevHTML).forEach(k => delete prevHTML[k]);
+  window.getSelection().removeAllRanges();
   pollData();
 }
 
