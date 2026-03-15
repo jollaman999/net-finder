@@ -745,7 +745,7 @@ type webProbeResult struct {
 	isTLS  bool
 }
 
-// tryHTTP attempts an HTTP(S) request on a port and returns title + TLS status.
+// tryHTTP attempts an HTTP(S) request on a port, follows redirects, and returns title + TLS status.
 func tryHTTP(ip, port string) *webProbeResult {
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
 	if err != nil {
@@ -761,18 +761,79 @@ func tryHTTP(ip, port string) *webProbeResult {
 		conn = tlsConn
 	} else {
 		tlsConn.Close()
-		// Reconnect for plain HTTP
 		conn, err = net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
 		if err != nil {
 			return nil
 		}
 	}
 
+	path := "/"
+	for redirect := 0; redirect < 3; redirect++ {
+		body := httpGet(conn, ip, path)
+		conn = nil // consumed
+
+		if body == "" || !strings.HasPrefix(body, "HTTP/") {
+			return nil
+		}
+
+		// Check for redirect
+		if loc := extractRedirectLocation(body); loc != "" {
+			// Same host redirect — follow it
+			newPath := loc
+			// Handle absolute URL: extract path only if same host
+			if strings.HasPrefix(loc, "http://") || strings.HasPrefix(loc, "https://") {
+				// If redirecting to HTTPS on same host, reconnect with TLS
+				if strings.HasPrefix(loc, "https://") && !isTLS {
+					isTLS = true
+				}
+				// Extract path from URL
+				slashIdx := strings.Index(loc[8:], "/") // skip "https://"
+				if slashIdx != -1 {
+					newPath = loc[8+slashIdx:]
+				} else {
+					newPath = "/"
+				}
+			}
+			path = newPath
+
+			// Reconnect for next request
+			c, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+			if err != nil {
+				return nil
+			}
+			if isTLS {
+				tc := tls.Client(c, &tls.Config{InsecureSkipVerify: true})
+				tc.SetDeadline(time.Now().Add(1 * time.Second))
+				if err := tc.Handshake(); err != nil {
+					c.Close()
+					return nil
+				}
+				conn = tc
+			} else {
+				conn = c
+			}
+			continue
+		}
+
+		// Not a redirect — try to identify the service
+		if name := identifyService(body, ip); name != "" {
+			return &webProbeResult{port: port, title: name, isTLS: isTLS}
+		}
+		return nil
+	}
+	return nil
+}
+
+// httpGet sends a GET request on an existing connection and returns the response body.
+func httpGet(conn net.Conn, host, path string) string {
+	if conn == nil {
+		return ""
+	}
 	conn.SetDeadline(time.Now().Add(2 * time.Second))
-	req := fmt.Sprintf("GET / HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", ip)
+	req := fmt.Sprintf("GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", path, host)
 	if _, err := conn.Write([]byte(req)); err != nil {
 		conn.Close()
-		return nil
+		return ""
 	}
 
 	buf := make([]byte, 8192)
@@ -785,21 +846,33 @@ func tryHTTP(ip, port string) *webProbeResult {
 		}
 	}
 	conn.Close()
-
 	if total == 0 {
-		return nil
+		return ""
 	}
-	body := string(buf[:total])
+	return string(buf[:total])
+}
 
-	// Must be an HTTP response
-	if !strings.HasPrefix(body, "HTTP/") {
-		return nil
+// extractRedirectLocation returns the Location header value from a 3xx response, or "".
+func extractRedirectLocation(response string) string {
+	// Check for 3xx status
+	if len(response) < 12 {
+		return ""
+	}
+	status := response[9:12]
+	if status[0] != '3' {
+		return ""
 	}
 
-	if name := identifyService(body, ip); name != "" {
-		return &webProbeResult{port: port, title: name, isTLS: isTLS}
+	headerEnd := strings.Index(response, "\r\n\r\n")
+	if headerEnd == -1 {
+		headerEnd = len(response)
 	}
-	return nil
+	for _, line := range strings.Split(response[:headerEnd], "\r\n") {
+		if strings.HasPrefix(strings.ToLower(line), "location:") {
+			return strings.TrimSpace(line[9:])
+		}
+	}
+	return ""
 }
 
 // identifyService extracts service identity from an HTTP response using multiple strategies:
