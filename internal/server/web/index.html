@@ -1752,6 +1752,7 @@ function toggleSubnetFilter(panelKey, subnet, checked) {
 
 // ── Expanded hostname tracking ──
 const expandedHostnames = new Set();
+const expandedNotes = new Set();
 
 // ── Hosts table (grouped) ──
 const hostsFields = [null, 'ip', 'hostname', 'note', 'mac'];
@@ -1829,7 +1830,7 @@ function renderHostsTable() {
             const hnExp = expandedHostnames.has(h.ip) ? ' expanded' : '';
             const hn = esc(h.hostname||'-');
             const nt = esc(h.note||'').replace(/\t/g, ' ').replace(/^(HTTPS?)\s/gm, '<b>$1</b> ').replace(/\n/g, '<br>');
-            html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td class="note-cell" onclick="this.classList.toggle('expanded')" title="${escAttr(h.note||'')}">${nt}</td><td colspan="2">${mvCell}</td></tr>`;
+            html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td class="note-cell${expandedNotes.has(h.ip) ? ' expanded' : ''}" onclick="toggleNote('${escAttr(h.ip)}')" title="${escAttr(h.note||'')}">${nt}</td><td colspan="2">${mvCell}</td></tr>`;
           }
         }
       } else {
@@ -1850,7 +1851,7 @@ function renderHostsTable() {
           const hnExp = expandedHostnames.has(h.ip) ? ' expanded' : '';
           const hn = esc(h.hostname||'-');
           const nt = esc(h.note||'').replace(/\t/g, ' ').replace(/^(HTTPS?)\s/gm, '<b>$1</b> ').replace(/\n/g, '<br>');
-          html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td class="note-cell" onclick="this.classList.toggle('expanded')" title="${escAttr(h.note||'')}">${nt}</td><td colspan="2">${mvCell}</td></tr>`;
+          html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td class="note-cell${expandedNotes.has(h.ip) ? ' expanded' : ''}" onclick="toggleNote('${escAttr(h.ip)}')" title="${escAttr(h.note||'')}">${nt}</td><td colspan="2">${mvCell}</td></tr>`;
         }
       }
     }
@@ -2513,6 +2514,11 @@ function toggleHostname(el, ip) {
   if (expandedHostnames.has(ip)) expandedHostnames.delete(ip);
   else expandedHostnames.add(ip);
   el.classList.toggle('expanded');
+}
+function toggleNote(ip) {
+  if (expandedNotes.has(ip)) expandedNotes.delete(ip);
+  else expandedNotes.add(ip);
+  renderHostsTable();
 }
 
 // ── Init ──
