@@ -95,7 +95,7 @@ func ResolveNotesStream(ips []string, stopCh <-chan struct{}, onResult func(ip, 
 		return
 	}
 
-	const maxConns = 500
+	const maxConns = 1000
 	sem := make(chan struct{}, maxConns)
 
 	for _, ip := range ips {
