@@ -797,18 +797,14 @@ func (s *Scanner) resolveHostnames() {
 func (s *Scanner) backgroundResolveNotes() {
 	s.state.Mu.RLock()
 	var v4ips, v6ips []string
-	macToV4 := make(map[string]string) // MAC → IPv4 IP (for merging)
-	v6mac := make(map[string]string)   // IPv6 IP → MAC
 	for _, h := range s.state.Hosts {
 		if h.Note != "" {
 			continue
 		}
 		if h.IPVersion == 4 {
 			v4ips = append(v4ips, h.IP)
-			macToV4[strings.ToUpper(h.MAC)] = h.IP
 		} else {
 			v6ips = append(v6ips, h.IP)
-			v6mac[h.IP] = strings.ToUpper(h.MAC)
 		}
 	}
 	s.state.Mu.RUnlock()
@@ -843,73 +839,14 @@ func (s *Scanner) backgroundResolveNotes() {
 	// Phase 1: Scan IPv4 hosts
 	hostname.ResolveNotesStream(v4ips, s.bgStopCh, setNote, incDone)
 
-	// Build MAC → Note from IPv4 results
-	s.state.Mu.RLock()
-	macNote := make(map[string]string)
-	for _, h := range s.state.Hosts {
-		if h.IPVersion == 4 && h.Note != "" {
-			macNote[strings.ToUpper(h.MAC)] = h.Note
-		}
-	}
-	s.state.Mu.RUnlock()
-
-	// Phase 2: Process IPv6 hosts
-	// - MAC matches IPv4 with note → copy note, then scan for additional IPv6-only services
-	// - No MAC match → scan independently
-	var v6only []string
-	for _, ip := range v6ips {
-		select {
-		case <-s.bgStopCh:
-			s.noteScanMu.Lock()
-			s.noteScanRunning = false
-			s.noteScanMu.Unlock()
-			return
-		default:
-		}
-		mac := v6mac[ip]
-		if existing, ok := macNote[mac]; ok {
-			// Copy IPv4 note as baseline
-			setNote(ip, existing)
-		}
-		// Always scan IPv6 too — may have IPv6-only services
-		v6only = append(v6only, ip)
-	}
-
-	hostname.ResolveNotesStream(v6only, s.bgStopCh, func(ip, note string) {
-		// Merge with existing note if any
-		s.state.Mu.Lock()
-		for i := range s.state.Hosts {
-			if s.state.Hosts[i].IP == ip {
-				if s.state.Hosts[i].Note != "" && s.state.Hosts[i].Note != note {
-					// Merge: append new entries not already present
-					s.state.Hosts[i].Note = mergeNotes(s.state.Hosts[i].Note, note)
-				} else {
-					s.state.Hosts[i].Note = note
-				}
-				break
-			}
-		}
-		s.state.Mu.Unlock()
-	}, incDone)
+	// Phase 2: Scan IPv6 hosts independently
+	hostname.ResolveNotesStream(v6ips, s.bgStopCh, setNote, incDone)
 
 	s.noteScanMu.Lock()
 	s.noteScanRunning = false
 	s.noteScanMu.Unlock()
 }
 
-// mergeNotes combines two note strings, deduplicating entries.
-func mergeNotes(existing, newNote string) string {
-	existingSet := make(map[string]bool)
-	for _, line := range strings.Split(existing, "\n") {
-		existingSet[line] = true
-	}
-	for _, line := range strings.Split(newNote, "\n") {
-		if !existingSet[line] {
-			existing += "\n" + line
-		}
-	}
-	return existing
-}
 
 // arpForHostnames does a quick ARP scan to get IPv4→MAC mappings for hostname resolution.
 // Used in IPv6-only mode so that hostnames resolved from IPv4 can be shared to IPv6 hosts via MAC.
