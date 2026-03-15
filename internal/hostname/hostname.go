@@ -9,6 +9,7 @@ import (
 	"html"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -87,9 +88,9 @@ func ResolveHostnames(ips []string) []models.HostnameEntry {
 	return results
 }
 
-// ResolveNotesStream scans all TCP ports on each IP sequentially, probes HTTP on open ports,
+// ResolveNotesStream scans all TCP ports on each IP, probes HTTP on open ports,
 // and calls onResult incrementally as results are found.
-// Concurrency is controlled by a semaphore limiting total simultaneous TCP connections.
+// Multiple hosts are processed in parallel, sharing a global connection semaphore.
 func ResolveNotesStream(ips []string, stopCh <-chan struct{}, onResult func(ip, note string)) {
 	if len(ips) == 0 {
 		return
@@ -98,16 +99,40 @@ func ResolveNotesStream(ips []string, stopCh <-chan struct{}, onResult func(ip, 
 	const maxConns = 1000
 	sem := make(chan struct{}, maxConns)
 
+	workers := 10
+	if len(ips) < workers {
+		workers = len(ips)
+	}
+
+	ch := make(chan string, len(ips))
+	var wg sync.WaitGroup
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for ip := range ch {
+				select {
+				case <-stopCh:
+					return
+				default:
+				}
+				if note := resolveHTTP(ip, sem, stopCh); note != "" {
+					onResult(ip, note)
+				}
+			}
+		}()
+	}
+
 	for _, ip := range ips {
 		select {
 		case <-stopCh:
-			return
-		default:
-		}
-		if note := resolveHTTP(ip, sem, stopCh); note != "" {
-			onResult(ip, note)
+			break
+		case ch <- ip:
 		}
 	}
+	close(ch)
+	wg.Wait()
 }
 
 // resolveDNSPTR performs a reverse DNS lookup
@@ -650,31 +675,65 @@ func resolveSMTP(ip string) string {
 	return hostname
 }
 
-// resolveHTTP scans all TCP ports on an IP, then probes HTTP on open ports.
-// sem limits total concurrent connections. Returns "title (:port)" or empty string.
+// resolveHTTP scans all TCP ports on an IP and probes HTTP on open ports concurrently.
+// Port scan and HTTP probing share the same semaphore and run in parallel —
+// as soon as a port is found open, HTTP probing starts immediately.
 func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
-	// Phase 1: full port scan with batched concurrency
-	openPorts := scanOpenPorts(ip, sem, stopCh)
-	if len(openPorts) == 0 {
-		return ""
-	}
-
-	// Phase 2: probe HTTP on all open ports, collect results
+	var mu sync.Mutex
 	var httpResults, httpsResults []webProbeResult
-	for _, port := range openPorts {
+	var probeWg sync.WaitGroup
+
+	// Port scan: when a port is found open, immediately start HTTP probe
+	var scanWg sync.WaitGroup
+	for port := 1; port <= 65535; port++ {
 		select {
 		case <-stopCh:
+			scanWg.Wait()
+			probeWg.Wait()
 			return ""
-		default:
+		case sem <- struct{}{}:
 		}
-		if r := tryHTTP(ip, port); r != nil {
-			if r.isTLS {
-				httpsResults = append(httpsResults, *r)
-			} else {
-				httpResults = append(httpResults, *r)
+
+		scanWg.Add(1)
+		go func(p int) {
+			defer func() { <-sem; scanWg.Done() }()
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, p), 200*time.Millisecond)
+			if err != nil {
+				return
 			}
-		}
+			conn.Close()
+
+			// Open port found — start HTTP probe immediately
+			portStr := fmt.Sprintf("%d", p)
+			probeWg.Add(1)
+			go func() {
+				defer probeWg.Done()
+				if r := tryHTTP(ip, portStr); r != nil {
+					mu.Lock()
+					if r.isTLS {
+						httpsResults = append(httpsResults, *r)
+					} else {
+						httpResults = append(httpResults, *r)
+					}
+					mu.Unlock()
+				}
+			}()
+		}(port)
 	}
+
+	scanWg.Wait()
+	probeWg.Wait()
+
+	// Sort by port number
+	sortResults := func(rs []webProbeResult) {
+		sort.Slice(rs, func(i, j int) bool {
+			pi, _ := strconv.Atoi(rs[i].port)
+			pj, _ := strconv.Atoi(rs[j].port)
+			return pi < pj
+		})
+	}
+	sortResults(httpResults)
+	sortResults(httpsResults)
 
 	// Format: "HTTP name (port), name (port)\nHTTPS name (port), name (port)"
 	var lines []string
@@ -696,52 +755,6 @@ func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
 		return ""
 	}
 	return strings.Join(lines, "\n")
-}
-
-// scanOpenPorts scans all 65535 TCP ports with a short timeout and returns open ones.
-func scanOpenPorts(ip string, sem chan struct{}, stopCh <-chan struct{}) []string {
-	type result struct {
-		port int
-	}
-
-	results := make(chan result, 1024)
-	var wg sync.WaitGroup
-
-	for port := 1; port <= 65535; port++ {
-		select {
-		case <-stopCh:
-			go func() { wg.Wait(); close(results) }()
-			for range results {
-			}
-			return nil
-		case sem <- struct{}{}:
-		}
-
-		wg.Add(1)
-		go func(p int) {
-			defer func() { <-sem; wg.Done() }()
-			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, p), 200*time.Millisecond)
-			if err != nil {
-				return
-			}
-			conn.Close()
-			results <- result{p}
-		}(port)
-	}
-
-	go func() { wg.Wait(); close(results) }()
-
-	var ports []int
-	for r := range results {
-		ports = append(ports, r.port)
-	}
-
-	sort.Ints(ports)
-	out := make([]string, len(ports))
-	for i, p := range ports {
-		out[i] = fmt.Sprintf("%d", p)
-	}
-	return out
 }
 
 // webProbeResult holds the result of probing a single port
