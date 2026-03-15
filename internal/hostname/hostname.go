@@ -770,28 +770,28 @@ type webProbeResult struct {
 
 // tryHTTP attempts an HTTP(S) request on a port and returns title + TLS status.
 func tryHTTP(ip, port string) *webProbeResult {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 3*time.Second)
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
 	if err != nil {
 		return nil
 	}
 
-	// Try TLS first, fall back to plain HTTP
+	// Try TLS first with short timeout, fall back to plain HTTP
 	isTLS := false
 	tlsConn := tls.Client(conn, &tls.Config{InsecureSkipVerify: true})
-	tlsConn.SetDeadline(time.Now().Add(3 * time.Second))
+	tlsConn.SetDeadline(time.Now().Add(1 * time.Second))
 	if err := tlsConn.Handshake(); err == nil {
 		isTLS = true
 		conn = tlsConn
 	} else {
 		tlsConn.Close()
 		// Reconnect for plain HTTP
-		conn, err = net.DialTimeout("tcp", net.JoinHostPort(ip, port), 3*time.Second)
+		conn, err = net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
 		if err != nil {
 			return nil
 		}
 	}
 
-	conn.SetDeadline(time.Now().Add(3 * time.Second))
+	conn.SetDeadline(time.Now().Add(2 * time.Second))
 	req := fmt.Sprintf("GET / HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", ip)
 	if _, err := conn.Write([]byte(req)); err != nil {
 		conn.Close()
