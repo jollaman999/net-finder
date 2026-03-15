@@ -363,6 +363,8 @@ tr.subnet-header:hover { background: var(--primary-light); }
 .datetime-cell { white-space: nowrap; }
 .hostname-cell .hn { display: block; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; -webkit-tap-highlight-color: rgba(0,0,0,0.1); }
 .hostname-cell.expanded .hn { white-space: normal; word-break: break-all; overflow: visible; }
+.note-cell { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; font-size: 12px; }
+.note-cell.expanded { white-space: normal; word-break: break-all; overflow: visible; }
 .modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -1827,7 +1829,7 @@ function renderHostsTable() {
             const hnExp = expandedHostnames.has(h.ip) ? ' expanded' : '';
             const hn = esc(h.hostname||'-');
             const nt = esc(h.note||'').replace(/\t/g, ' ').replace(/^(HTTPS?)\s/gm, '<b>$1</b> ').replace(/\n/g, '<br>');
-            html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td class="hostname-cell${hnExp}" title="${escAttr(h.note||'')}">${nt}</td><td colspan="2">${mvCell}</td></tr>`;
+            html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td class="note-cell" onclick="this.classList.toggle('expanded')" title="${escAttr(h.note||'')}">${nt}</td><td colspan="2">${mvCell}</td></tr>`;
           }
         }
       } else {
@@ -1848,7 +1850,7 @@ function renderHostsTable() {
           const hnExp = expandedHostnames.has(h.ip) ? ' expanded' : '';
           const hn = esc(h.hostname||'-');
           const nt = esc(h.note||'').replace(/\t/g, ' ').replace(/^(HTTPS?)\s/gm, '<b>$1</b> ').replace(/\n/g, '<br>');
-          html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td class="hostname-cell${hnExp}" title="${escAttr(h.note||'')}">${nt}</td><td colspan="2">${mvCell}</td></tr>`;
+          html += `<tr${rowClass}><td>${idx}</td><td>${esc(h.ip)}${badge}</td><td class="hostname-cell${hnExp}"><span class="hn" onclick="toggleHostname(this.parentElement,'${escAttr(h.ip)}')" title="${escAttr(h.hostname||'')}">${hn}</span></td><td class="note-cell" onclick="this.classList.toggle('expanded')" title="${escAttr(h.note||'')}">${nt}</td><td colspan="2">${mvCell}</td></tr>`;
         }
       }
     }
