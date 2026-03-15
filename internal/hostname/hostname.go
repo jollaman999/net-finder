@@ -91,7 +91,7 @@ func ResolveHostnames(ips []string) []models.HostnameEntry {
 // ResolveNotesStream scans all TCP ports on each IP, probes HTTP on open ports,
 // and calls onResult incrementally as results are found.
 // Multiple hosts are processed in parallel, sharing a global connection semaphore.
-func ResolveNotesStream(ips []string, stopCh <-chan struct{}, onResult func(ip, note string)) {
+func ResolveNotesStream(ips []string, stopCh <-chan struct{}, onResult func(ip, note string), onHostDone func()) {
 	if len(ips) == 0 {
 		return
 	}
@@ -117,8 +117,12 @@ func ResolveNotesStream(ips []string, stopCh <-chan struct{}, onResult func(ip, 
 					return
 				default:
 				}
-				if note := resolveHTTP(ip, sem, stopCh); note != "" {
+				note := resolveHTTP(ip, sem, stopCh)
+				if note != "" {
 					onResult(ip, note)
+				}
+				if onHostDone != nil {
+					onHostDone()
 				}
 			}
 		}()

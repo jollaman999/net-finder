@@ -44,6 +44,12 @@ type Scanner struct {
 	hostnameMu     sync.RWMutex
 	emailedARPKeys map[string]bool
 	emailedNDPKeys map[string]bool
+
+	// Background note scanning progress
+	noteScanTotal   int
+	noteScanDone    int
+	noteScanRunning bool
+	noteScanMu      sync.RWMutex
 }
 
 // NewScanner creates a new Scanner instance
@@ -144,11 +150,20 @@ func (s *Scanner) GetStatus() map[string]interface{} {
 		subnetStrs = append(subnetStrs, sn.String())
 	}
 	netutil.SortCIDRStrings(subnetStrs)
+	s.noteScanMu.RLock()
+	noteProgress := map[string]interface{}{
+		"running": s.noteScanRunning,
+		"total":   s.noteScanTotal,
+		"done":    s.noteScanDone,
+	}
+	s.noteScanMu.RUnlock()
+
 	return map[string]interface{}{
-		"status":   s.state.Status,
-		"progress": s.state.Progress,
-		"subnets":  subnetStrs,
-		"ipMode":   s.ipMode,
+		"status":       s.state.Status,
+		"progress":     s.state.Progress,
+		"subnets":      subnetStrs,
+		"ipMode":       s.ipMode,
+		"noteScan":     noteProgress,
 	}
 }
 
@@ -793,6 +808,12 @@ func (s *Scanner) backgroundResolveNotes() {
 		return
 	}
 
+	s.noteScanMu.Lock()
+	s.noteScanTotal = len(ips)
+	s.noteScanDone = 0
+	s.noteScanRunning = true
+	s.noteScanMu.Unlock()
+
 	hostname.ResolveNotesStream(ips, s.bgStopCh, func(ip, note string) {
 		s.state.Mu.Lock()
 		for i := range s.state.Hosts {
@@ -802,7 +823,15 @@ func (s *Scanner) backgroundResolveNotes() {
 			}
 		}
 		s.state.Mu.Unlock()
+	}, func() {
+		s.noteScanMu.Lock()
+		s.noteScanDone++
+		s.noteScanMu.Unlock()
 	})
+
+	s.noteScanMu.Lock()
+	s.noteScanRunning = false
+	s.noteScanMu.Unlock()
 }
 
 // arpForHostnames does a quick ARP scan to get IPv4→MAC mappings for hostname resolution.
