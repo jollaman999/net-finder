@@ -798,9 +798,14 @@ func (s *Scanner) backgroundResolveNotes() {
 	s.state.Mu.RLock()
 	var ips []string
 	for _, h := range s.state.Hosts {
-		if h.Note == "" {
-			ips = append(ips, h.IP)
+		if h.Note != "" {
+			continue
 		}
+		// Skip link-local IPv6 (fe80::) — not useful for HTTP probing
+		if strings.HasPrefix(strings.ToLower(h.IP), "fe80:") {
+			continue
+		}
+		ips = append(ips, h.IP)
 	}
 	s.state.Mu.RUnlock()
 

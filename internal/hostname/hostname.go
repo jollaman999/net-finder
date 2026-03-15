@@ -90,7 +90,7 @@ func ResolveHostnames(ips []string) []models.HostnameEntry {
 
 // ResolveNotesStream scans all TCP ports on each IP, probes HTTP on open ports,
 // and calls onResult incrementally as results are found.
-// Multiple hosts are processed in parallel, sharing a global connection semaphore.
+// Hosts are processed one at a time to avoid semaphore contention.
 func ResolveNotesStream(ips []string, stopCh <-chan struct{}, onResult func(ip, note string), onHostDone func()) {
 	if len(ips) == 0 {
 		return
@@ -99,44 +99,20 @@ func ResolveNotesStream(ips []string, stopCh <-chan struct{}, onResult func(ip, 
 	const maxConns = 1000
 	sem := make(chan struct{}, maxConns)
 
-	workers := 10
-	if len(ips) < workers {
-		workers = len(ips)
-	}
-
-	ch := make(chan string, len(ips))
-	var wg sync.WaitGroup
-
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for ip := range ch {
-				select {
-				case <-stopCh:
-					return
-				default:
-				}
-				note := resolveHTTP(ip, sem, stopCh)
-				if note != "" {
-					onResult(ip, note)
-				}
-				if onHostDone != nil {
-					onHostDone()
-				}
-			}
-		}()
-	}
-
 	for _, ip := range ips {
 		select {
 		case <-stopCh:
-			break
-		case ch <- ip:
+			return
+		default:
+		}
+		note := resolveHTTP(ip, sem, stopCh)
+		if note != "" {
+			onResult(ip, note)
+		}
+		if onHostDone != nil {
+			onHostDone()
 		}
 	}
-	close(ch)
-	wg.Wait()
 }
 
 // resolveDNSPTR performs a reverse DNS lookup
@@ -701,14 +677,15 @@ func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
 		scanWg.Add(1)
 		go func(p int) {
 			defer func() { <-sem; scanWg.Done() }()
-			conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, fmt.Sprintf("%d", p)), 200*time.Millisecond)
+			addr := net.JoinHostPort(ip, strconv.Itoa(p))
+			conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
 			if err != nil {
 				return
 			}
 			conn.Close()
 
 			// Open port found — start HTTP probe immediately
-			portStr := fmt.Sprintf("%d", p)
+			portStr := strconv.Itoa(p)
 			probeWg.Add(1)
 			go func() {
 				defer probeWg.Done()
