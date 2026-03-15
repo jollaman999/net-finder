@@ -658,7 +658,7 @@ func resolveSMTP(ip string) string {
 // sem limits total concurrent connections. Returns "title (:port)" or empty string.
 func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
 	// Phase 1: full port scan with batched concurrency
-	openPorts := scanWebPorts(ip, sem, stopCh)
+	openPorts := scanOpenPorts(ip, sem, stopCh)
 	if len(openPorts) == 0 {
 		return ""
 	}
@@ -754,19 +754,21 @@ func LoadWebPorts() {
 	}
 }
 
-// scanWebPorts scans common web ports and returns open ones as strings.
-func scanWebPorts(ip string, sem chan struct{}, stopCh <-chan struct{}) []string {
+// scanOpenPorts scans all 65535 TCP ports with a short timeout and returns open ones.
+func scanOpenPorts(ip string, sem chan struct{}, stopCh <-chan struct{}) []string {
 	type result struct {
 		port int
 	}
 
-	results := make(chan result, len(webPorts))
+	results := make(chan result, 1024)
 	var wg sync.WaitGroup
 
-	for _, port := range webPorts {
+	for port := 1; port <= 65535; port++ {
 		select {
 		case <-stopCh:
-			wg.Wait()
+			go func() { wg.Wait(); close(results) }()
+			for range results {
+			}
 			return nil
 		case sem <- struct{}{}:
 		}
@@ -774,7 +776,7 @@ func scanWebPorts(ip string, sem chan struct{}, stopCh <-chan struct{}) []string
 		wg.Add(1)
 		go func(p int) {
 			defer func() { <-sem; wg.Done() }()
-			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, p), 3*time.Second)
+			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, p), 200*time.Millisecond)
 			if err != nil {
 				return
 			}
@@ -783,8 +785,7 @@ func scanWebPorts(ip string, sem chan struct{}, stopCh <-chan struct{}) []string
 		}(port)
 	}
 
-	wg.Wait()
-	close(results)
+	go func() { wg.Wait(); close(results) }()
 
 	var ports []int
 	for r := range results {
