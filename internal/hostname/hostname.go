@@ -778,20 +778,38 @@ func tryHTTP(ip, port string) *webProbeResult {
 
 		// Check for redirect
 		if loc := extractRedirectLocation(body); loc != "" {
-			// Same host redirect — follow it
 			newPath := loc
-			// Handle absolute URL: extract path only if same host
+			// Handle absolute URL
 			if strings.HasPrefix(loc, "http://") || strings.HasPrefix(loc, "https://") {
-				// If redirecting to HTTPS on same host, reconnect with TLS
-				if strings.HasPrefix(loc, "https://") && !isTLS {
-					isTLS = true
+				// Extract host from URL
+				scheme := "http://"
+				if strings.HasPrefix(loc, "https://") {
+					scheme = "https://"
 				}
-				// Extract path from URL
-				slashIdx := strings.Index(loc[8:], "/") // skip "https://"
-				if slashIdx != -1 {
-					newPath = loc[8+slashIdx:]
+				rest := loc[len(scheme):]
+				hostPart := rest
+				pathStart := strings.Index(rest, "/")
+				if pathStart != -1 {
+					hostPart = rest[:pathStart]
+					newPath = rest[pathStart:]
 				} else {
 					newPath = "/"
+				}
+				// Strip port from host if present
+				redirectHost := hostPart
+				if colonIdx := strings.LastIndex(hostPart, ":"); colonIdx != -1 {
+					redirectHost = hostPart[:colonIdx]
+				}
+				// Skip if redirect goes to a different host
+				if redirectHost != ip {
+					// Resolve hostname to check if it's the same IP
+					resolved, err := net.ResolveIPAddr("ip", redirectHost)
+					if err != nil || resolved.String() != ip {
+						return nil
+					}
+				}
+				if scheme == "https://" && !isTLS {
+					isTLS = true
 				}
 			}
 			path = newPath
