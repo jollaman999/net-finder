@@ -701,7 +701,7 @@ func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
 		scanWg.Add(1)
 		go func(p int) {
 			defer func() { <-sem; scanWg.Done() }()
-			conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", ip, p), 200*time.Millisecond)
+			conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, fmt.Sprintf("%d", p)), 200*time.Millisecond)
 			if err != nil {
 				return
 			}
