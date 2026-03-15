@@ -836,14 +836,21 @@ func tryHTTP(ip, port string) *webProbeResult {
 		return nil
 	}
 
-	buf := make([]byte, 4096)
-	n, _ := conn.Read(buf)
+	buf := make([]byte, 8192)
+	total := 0
+	for total < len(buf) {
+		n, err := conn.Read(buf[total:])
+		total += n
+		if err != nil {
+			break
+		}
+	}
 	conn.Close()
 
-	if n == 0 {
+	if total == 0 {
 		return nil
 	}
-	body := string(buf[:n])
+	body := string(buf[:total])
 
 	// Must be an HTTP response
 	if !strings.HasPrefix(body, "HTTP/") {
