@@ -7,12 +7,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"html"
-	"log"
 	"net"
-	"os"
-	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -700,58 +696,6 @@ func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
 		return ""
 	}
 	return strings.Join(lines, "\n")
-}
-
-// Default web service ports to probe
-var defaultWebPorts = []int{
-	80, 443, 8080, 8443, 8000, 8888, 8006, 8008, 8081, 8082,
-	3000, 5000, 5601, 7443, 7080, 9090, 9443, 9200, 9000,
-	8086, 8087, 8161, 8181, 8280, 8880, 9999, 10000, 10443,
-	2082, 2083, 2086, 2087, 4443, 4848, 6080,
-	8834, 9080, 18080, 18443,
-	2375, 2376, 4194, 5984, 8200, 8500, 8300,
-	15672, 2379, 6443, 9093, 9100,
-}
-
-// webPorts is the active port list (overridden by config file)
-var webPorts = defaultWebPorts
-
-// LoadWebPorts loads custom web ports from ~/.config/net-finder/webports.conf.
-// File format: one port per line, # for comments, empty lines ignored.
-// If the file doesn't exist, default ports are used.
-func LoadWebPorts() {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return
-	}
-	path := filepath.Join(home, ".config", "net-finder", "webports.conf")
-	f, err := os.Open(path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	var ports []int
-	seen := make(map[int]bool)
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		p, err := strconv.Atoi(line)
-		if err != nil || p < 1 || p > 65535 {
-			continue
-		}
-		if !seen[p] {
-			seen[p] = true
-			ports = append(ports, p)
-		}
-	}
-	if len(ports) > 0 {
-		webPorts = ports
-		log.Printf("Loaded %d custom web ports from %s", len(ports), path)
-	}
 }
 
 // scanOpenPorts scans all 65535 TCP ports with a short timeout and returns open ones.
