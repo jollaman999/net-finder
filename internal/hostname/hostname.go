@@ -815,35 +815,18 @@ func tryHTTP(ip, port string) *webProbeResult {
 		return nil
 	}
 
-	// Try to extract <title>...</title> from 200 OK responses
-	if strings.Contains(body, " 200 ") {
-		lower := strings.ToLower(body)
-		start := strings.Index(lower, "<title>")
-		if start != -1 {
-			start += 7
-			end := strings.Index(lower[start:], "</title>")
-			if end != -1 {
-				title := html.UnescapeString(strings.TrimSpace(body[start : start+end]))
-				if title != "" && title != ip {
-					tl := strings.ToLower(title)
-					if tl != "document" && tl != "untitled" && !strings.Contains(tl, "welcome") && !strings.Contains(tl, "index of") {
-						return &webProbeResult{port: port, title: title, isTLS: isTLS}
-					}
-				}
-			}
-		}
-	}
-
-	// Fallback: identify service from HTTP headers
-	if name := identifyService(body); name != "" {
+	if name := identifyService(body, ip); name != "" {
 		return &webProbeResult{port: port, title: name, isTLS: isTLS}
 	}
 	return nil
 }
 
-// identifyService extracts service name from HTTP response headers and body.
-func identifyService(response string) string {
-	// Split headers from body
+// identifyService extracts service identity from an HTTP response using multiple strategies:
+// 1. HTML <title> tag (any status code)
+// 2. X-*-Version / X-*-Build headers (auto-detected)
+// 3. Server header (non-generic)
+// 4. JSON body (name/version/product keys)
+func identifyService(response, ip string) string {
 	headerEnd := strings.Index(response, "\r\n\r\n")
 	var headers, body string
 	if headerEnd != -1 {
@@ -852,95 +835,154 @@ func identifyService(response string) string {
 	} else {
 		headers = response
 	}
-	headersLower := strings.ToLower(headers)
 
-	// Known header patterns → service name
-	knownHeaders := []struct {
-		header string // lowercase
-		prefix string
-	}{
-		{"x-influxdb-version:", "InfluxDB"},
-		{"x-jenkins:", "Jenkins"},
-		{"x-grafana-version:", "Grafana"},
-		{"x-elastic-product:", ""},
-		{"kbn-name:", ""},
-		{"x-consul-index:", "Consul"},
-		{"x-vault-token:", "Vault"},
-		{"x-couchdb-body-time:", "CouchDB"},
-		{"x-proxmox-api-version:", "Proxmox"},
-		{"x-gitlab-meta:", "GitLab"},
-		{"x-gitea-version:", "Gitea"},
-		{"x-harbor-csrf-token:", "Harbor"},
-		{"x-rancher-version:", "Rancher"},
-		{"x-portainer-version:", "Portainer"},
-		{"x-sonarqube-version:", "SonarQube"},
-		{"x-redmine-api-version:", "Redmine"},
-		{"x-nexus-ui:", "Nexus"},
-		{"x-zabbix-version:", "Zabbix"},
-	}
-	for _, kh := range knownHeaders {
-		idx := strings.Index(headersLower, kh.header)
-		if idx == -1 {
-			continue
-		}
-		line := headers[idx:]
-		if nl := strings.IndexAny(line, "\r\n"); nl != -1 {
-			line = line[:nl]
-		}
-		val := strings.TrimSpace(line[len(kh.header):])
-		if kh.prefix != "" {
-			if val != "" {
-				return fmt.Sprintf("%s %s", kh.prefix, val)
-			}
-			return kh.prefix
-		}
-		if val != "" {
-			return val
-		}
+	// 1. HTML <title> — try on any status code
+	if title := extractTitle(body, ip); title != "" {
+		return title
 	}
 
-	// Server header — use for non-generic servers
-	genericServers := []string{"apache", "nginx", "httpd", "lighttpd", "openresty", "gunicorn", "python"}
-	for _, line := range strings.Split(headers, "\r\n") {
-		if strings.HasPrefix(strings.ToLower(line), "server:") {
-			val := strings.TrimSpace(line[7:])
-			if val == "" {
-				continue
-			}
-			vl := strings.ToLower(val)
-			isGeneric := false
-			for _, g := range genericServers {
-				if strings.Contains(vl, g) {
-					isGeneric = true
-					break
-				}
-			}
-			if !isGeneric {
-				return val
-			}
-		}
+	// 2. Auto-detect X-*-Version / X-*-Name / X-*-Build headers
+	if name := extractFromXHeaders(headers); name != "" {
+		return name
 	}
 
-	// JSON body detection for REST API services
+	// 3. Server header (skip generic web servers)
+	if name := extractFromServer(headers); name != "" {
+		return name
+	}
+
+	// 4. JSON body
 	body = strings.TrimSpace(body)
 	if len(body) > 0 && body[0] == '{' {
-		return identifyFromJSON(body)
+		if name := extractFromJSON(body); name != "" {
+			return name
+		}
 	}
 
 	return ""
 }
 
-// identifyFromJSON tries to identify a service from a JSON response body.
-func identifyFromJSON(body string) string {
-	// Quick key extraction without full JSON parsing
+// extractTitle pulls <title> from HTML, filtering out useless titles.
+func extractTitle(body, ip string) string {
+	lower := strings.ToLower(body)
+	start := strings.Index(lower, "<title>")
+	if start == -1 {
+		return ""
+	}
+	start += 7
+	end := strings.Index(lower[start:], "</title>")
+	if end == -1 {
+		return ""
+	}
+	title := html.UnescapeString(strings.TrimSpace(body[start : start+end]))
+	if title == "" || title == ip {
+		return ""
+	}
+	tl := strings.ToLower(title)
+	skip := []string{"document", "untitled", "welcome", "index of", "404", "not found",
+		"error", "forbidden", "unauthorized", "bad request", "301 moved", "302 found",
+		"page not found", "default page", "it works", "test page", "web server"}
+	for _, s := range skip {
+		if strings.Contains(tl, s) {
+			return ""
+		}
+	}
+	return title
+}
+
+// extractFromXHeaders auto-detects X-*-Version, X-*-Build, X-*-Name style headers.
+// Extracts the service name from the header key itself.
+func extractFromXHeaders(headers string) string {
+	for _, line := range strings.Split(headers, "\r\n") {
+		lineLower := strings.ToLower(line)
+		if !strings.HasPrefix(lineLower, "x-") {
+			continue
+		}
+		colonIdx := strings.Index(line, ":")
+		if colonIdx == -1 {
+			continue
+		}
+		key := strings.TrimSpace(line[:colonIdx])
+		val := strings.TrimSpace(line[colonIdx+1:])
+		keyLower := strings.ToLower(key)
+
+		// Match X-*-Version, X-*-Build, X-*-Api-Version patterns
+		isVersion := strings.HasSuffix(keyLower, "-version") ||
+			strings.HasSuffix(keyLower, "-build") ||
+			strings.HasSuffix(keyLower, "-api-version")
+		// Match X-*-Name patterns
+		isName := strings.HasSuffix(keyLower, "-name") && !strings.Contains(keyLower, "header")
+
+		if !isVersion && !isName {
+			continue
+		}
+
+		// Extract service name from header key: "X-Influxdb-Version" → "Influxdb"
+		name := key[2:] // strip "X-"
+		// Remove suffix
+		for _, suffix := range []string{"-Version", "-version", "-Build", "-build",
+			"-Api-Version", "-api-version", "-Name", "-name"} {
+			if strings.HasSuffix(name, suffix) {
+				name = name[:len(name)-len(suffix)]
+				break
+			}
+		}
+		name = strings.ReplaceAll(name, "-", " ")
+		name = strings.TrimSpace(name)
+
+		if name == "" {
+			continue
+		}
+		if isVersion && val != "" {
+			return fmt.Sprintf("%s %s", name, val)
+		}
+		if isName && val != "" {
+			return val
+		}
+	}
+	return ""
+}
+
+// extractFromServer uses the Server header if it's not a generic web server.
+func extractFromServer(headers string) string {
+	generic := []string{"apache", "nginx", "httpd", "lighttpd", "openresty",
+		"gunicorn", "python", "gws", "cloudflare", "akamai", "microsoft-iis"}
+	for _, line := range strings.Split(headers, "\r\n") {
+		if !strings.HasPrefix(strings.ToLower(line), "server:") {
+			continue
+		}
+		val := strings.TrimSpace(line[7:])
+		if val == "" {
+			continue
+		}
+		vl := strings.ToLower(val)
+		isGeneric := false
+		for _, g := range generic {
+			if strings.Contains(vl, g) {
+				isGeneric = true
+				break
+			}
+		}
+		if !isGeneric {
+			return val
+		}
+	}
+	return ""
+}
+
+// extractFromJSON identifies a service from a JSON response body.
+func extractFromJSON(body string) string {
 	get := func(key string) string {
 		pattern := fmt.Sprintf(`"%s"`, key)
 		idx := strings.Index(body, pattern)
 		if idx == -1 {
-			return ""
+			// try case-insensitive
+			idx = strings.Index(strings.ToLower(body), strings.ToLower(pattern))
+			if idx == -1 {
+				return ""
+			}
 		}
 		rest := body[idx+len(pattern):]
-		// skip :" or : "
 		rest = strings.TrimLeft(rest, ": \t")
 		if len(rest) == 0 {
 			return ""
@@ -952,7 +994,6 @@ func identifyFromJSON(body string) string {
 			}
 			return rest[1 : end+1]
 		}
-		// numeric or boolean value
 		end := strings.IndexAny(rest, ",}\r\n ")
 		if end == -1 {
 			return rest
@@ -960,53 +1001,36 @@ func identifyFromJSON(body string) string {
 		return rest[:end]
 	}
 
-	// Elasticsearch: {"name":"...","cluster_name":"...","version":{"number":"..."}}
-	if cn := get("cluster_name"); cn != "" {
-		if ver := get("number"); ver != "" {
-			return fmt.Sprintf("Elasticsearch %s (%s)", ver, cn)
-		}
-		return fmt.Sprintf("Elasticsearch (%s)", cn)
-	}
+	// Try to build "name version" from common JSON key patterns
+	var name, version string
 
-	// CouchDB: {"couchdb":"Welcome","version":"..."}
-	if get("couchdb") != "" {
-		if ver := get("version"); ver != "" {
-			return fmt.Sprintf("CouchDB %s", ver)
-		}
-		return "CouchDB"
-	}
-
-	// Consul: {"consul_version":"..."}
-	if ver := get("consul_version"); ver != "" {
-		return fmt.Sprintf("Consul %s", ver)
-	}
-
-	// Docker Registry: {"repositories":[...]} — from /v2/_catalog
-	// Docker daemon: {"ApiVersion":"...","Version":"..."}
-	if ver := get("ApiVersion"); ver != "" {
-		if dv := get("Version"); dv != "" {
-			return fmt.Sprintf("Docker %s", dv)
+	// Product/service name keys (ordered by specificity)
+	for _, k := range []string{"product", "app", "application", "service",
+		"name", "cluster_name", "server", "software"} {
+		if v := get(k); v != "" {
+			name = v
+			break
 		}
 	}
 
-	// Prometheus: {"status":"...","data":{"version":"..."}}
-	if get("status") == "success" {
-		if ver := get("version"); ver != "" {
-			return fmt.Sprintf("Prometheus %s", ver)
+	// Version keys
+	for _, k := range []string{"version", "number", "server_version",
+		"api_version", "build"} {
+		if v := get(k); v != "" {
+			version = v
+			break
 		}
 	}
 
-	// Minio: {"status":"..."}  — already caught by Server header usually
-	// RabbitMQ management: {"rabbitmq_version":"..."}
-	if ver := get("rabbitmq_version"); ver != "" {
-		return fmt.Sprintf("RabbitMQ %s", ver)
+	if name != "" && version != "" {
+		return fmt.Sprintf("%s %s", name, version)
 	}
-
-	// etcd: {"etcdserver":"...","etcdcluster":"..."}
-	if ver := get("etcdserver"); ver != "" {
-		return fmt.Sprintf("etcd %s", ver)
+	if name != "" {
+		return name
 	}
-
+	if version != "" {
+		return version
+	}
 	return ""
 }
 
