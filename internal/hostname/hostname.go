@@ -1082,6 +1082,10 @@ func extractFromJSON(body string) string {
 			}
 			return rest[1 : end+1]
 		}
+		// Skip object/array values
+		if rest[0] == '{' || rest[0] == '[' {
+			return ""
+		}
 		end := strings.IndexAny(rest, ",}\r\n ")
 		if end == -1 {
 			return rest
