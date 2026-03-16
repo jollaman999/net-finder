@@ -1561,8 +1561,8 @@ async function pollData() {
     // Build MAC→IP lookup from all hosts
     macToIP = {};
     allHosts.forEach(h => {
-      macToIP[h.mac.toUpperCase()] = h.ip;
-      if (h.bondMACs) h.bondMACs.forEach(m => { macToIP[m.toUpperCase()] = h.ip; });
+      macToIP[h.mac.toLowerCase()] = h.ip;
+      if (h.bondMACs) h.bondMACs.forEach(m => { macToIP[m.toLowerCase()] = h.ip; });
     });
 
     // Build IP→conflict lookup
@@ -1967,11 +1967,11 @@ function renderVRRPRow(e) {
 }
 function lookupMAC(mac) {
   if (!mac) return '';
-  return macToIP[mac.toUpperCase()] || '';
+  return macToIP[mac.toLowerCase()] || '';
 }
 function renderLLDPRow(e) {
   const addr = e.mgmtAddr || lookupMAC(e.sourceMAC) || lookupMAC(e.chassisID) || '';
-  return `<tr><td>${esc(e.chassisID)}</td><td>${esc(e.portID)}</td><td>${esc(e.sysName)}</td><td>${esc(e.sysDesc)}</td><td>${esc(addr)}</td><td class="mac-cell">${esc((e.sourceMAC||'').toUpperCase())}</td><td>${e.ttl}</td><td class="datetime-cell">${esc(e.timestamp)}</td></tr>`;
+  return `<tr><td>${esc(e.chassisID)}</td><td>${esc(e.portID)}</td><td>${esc(e.sysName)}</td><td>${esc(e.sysDesc)}</td><td>${esc(addr)}</td><td class="mac-cell">${esc((e.sourceMAC||''))}</td><td>${e.ttl}</td><td class="datetime-cell">${esc(e.timestamp)}</td></tr>`;
 }
 function renderCDPRow(e) {
   let addrs = e.addresses || [];
@@ -1979,7 +1979,7 @@ function renderCDPRow(e) {
     const ip = lookupMAC(e.sourceMAC);
     if (ip) addrs = [ip];
   }
-  return `<tr><td>${esc(e.deviceID)}</td><td>${addrs.map(esc).join(', ')}</td><td class="mac-cell">${esc((e.sourceMAC||'').toUpperCase())}</td><td>${esc(e.portID)}</td><td>${esc(e.platform)}</td><td>${esc(e.version)}</td><td>${e.nativeVLAN||'-'}</td><td class="datetime-cell">${esc(e.timestamp)}</td></tr>`;
+  return `<tr><td>${esc(e.deviceID)}</td><td>${addrs.map(esc).join(', ')}</td><td class="mac-cell">${esc((e.sourceMAC||''))}</td><td>${esc(e.portID)}</td><td>${esc(e.platform)}</td><td>${esc(e.version)}</td><td>${e.nativeVLAN||'-'}</td><td class="datetime-cell">${esc(e.timestamp)}</td></tr>`;
 }
 function alertTypeLabel(type_) {
   switch(type_) {

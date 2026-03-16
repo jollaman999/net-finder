@@ -567,7 +567,7 @@ func (s *Scanner) processARPResults(result *protocol.ARPResult) {
 		// Every IP goes into the host list
 		host := models.HostEntry{
 			IP:        ipStr,
-			MAC:       strings.ToUpper(mac.String()),
+			MAC:       mac.String(),
 			Vendor:    vendor,
 			Subnet:    subnet,
 			IPVersion: 4,
@@ -581,7 +581,7 @@ func (s *Scanner) processARPResults(result *protocol.ARPResult) {
 			var macStrs []string
 			var vendorStrs []string
 			for _, m := range macs {
-				macStrs = append(macStrs, strings.ToUpper(m.String()))
+				macStrs = append(macStrs, m.String())
 				if s.oui != nil {
 					vendorStrs = append(vendorStrs, s.oui.Lookup(m))
 				}
@@ -653,7 +653,7 @@ func (s *Scanner) processDHCPResults(servers []models.DHCPServerInfo) {
 			entry.ServerIP = srv.ServerIP.String()
 		}
 		if srv.ServerMAC != nil {
-			entry.ServerMAC = strings.ToUpper(srv.ServerMAC.String())
+			entry.ServerMAC = srv.ServerMAC.String()
 			if s.oui != nil {
 				entry.Vendor = s.oui.Lookup(srv.ServerMAC)
 			}
@@ -727,12 +727,12 @@ func (s *Scanner) resolveHostnames() {
 	macProtoName := make(map[string]string)
 	for _, e := range s.state.LLDPNeighbors {
 		if e.SysName != "" && e.SourceMAC != "" {
-			macProtoName[strings.ToUpper(e.SourceMAC)] = e.SysName
+			macProtoName[strings.ToLower(e.SourceMAC)] = e.SysName
 		}
 	}
 	for _, e := range s.state.CDPNeighbors {
 		if e.DeviceID != "" && e.SourceMAC != "" {
-			mac := strings.ToUpper(e.SourceMAC)
+			mac := strings.ToLower(e.SourceMAC)
 			if _, exists := macProtoName[mac]; !exists {
 				macProtoName[mac] = e.DeviceID
 			}
@@ -747,7 +747,7 @@ func (s *Scanner) resolveHostnames() {
 	// First pass: collect known hostnames per MAC
 	for _, h := range hostsCopy {
 		if hn, ok := s.hostnameMap[h.IP]; ok && hn != "" {
-			mac := strings.ToUpper(h.MAC)
+			mac := strings.ToLower(h.MAC)
 			if mac != "" {
 				macHostname[mac] = hn
 			}
@@ -762,7 +762,7 @@ func (s *Scanner) resolveHostnames() {
 	// Second pass: fill missing hostnames from MAC match
 	for _, h := range hostsCopy {
 		if hn, ok := s.hostnameMap[h.IP]; (!ok || hn == "") && h.MAC != "" {
-			mac := strings.ToUpper(h.MAC)
+			mac := strings.ToLower(h.MAC)
 			if shared, found := macHostname[mac]; found {
 				s.hostnameMap[h.IP] = shared
 			}
@@ -1090,7 +1090,11 @@ func (s *Scanner) backgroundARPMonitor() {
 						a.OldVendors = append(a.OldVendors, s.lookupVendor(m))
 					}
 					a.NewVendor = s.lookupVendor(a.NewMAC)
-					conflictMACs := append(append([]string{}, a.OldMACs...), a.NewMAC)
+					var conflictMACs []string
+					for _, m := range a.OldMACs {
+						conflictMACs = append(conflictMACs, strings.ToLower(m))
+					}
+					conflictMACs = append(conflictMACs, strings.ToLower(a.NewMAC))
 					conflictVendors := append(append([]string{}, a.OldVendors...), a.NewVendor)
 					s.state.ARPAlerts = append(s.state.ARPAlerts, a)
 					// Skip conflict if all MACs are identical (duplicate ARP replies, not real conflict)
@@ -1102,12 +1106,22 @@ func (s *Scanner) backgroundARPMonitor() {
 						}
 					}
 					if !allSame {
-						s.state.Conflicts = append(s.state.Conflicts, models.ConflictEntry{
-							IP:      a.IP,
-							MACs:    conflictMACs,
-							Vendors: conflictVendors,
-							Subnet:  a.Subnet,
-						})
+						// Check if conflict already exists for this IP
+						exists := false
+						for _, c := range s.state.Conflicts {
+							if c.IP == a.IP {
+								exists = true
+								break
+							}
+						}
+						if !exists {
+							s.state.Conflicts = append(s.state.Conflicts, models.ConflictEntry{
+								IP:      a.IP,
+								MACs:    conflictMACs,
+								Vendors: conflictVendors,
+								Subnet:  a.Subnet,
+							})
+						}
 					}
 					if !s.emailedARPKeys[key] {
 						s.emailedARPKeys[key] = true
@@ -1134,7 +1148,7 @@ func (s *Scanner) processNDPResults(result *protocol.NDPResult) {
 		ip := net.ParseIP(ipStr)
 		if ip != nil && !ip.IsLinkLocalUnicast() {
 			for _, m := range macs {
-				globalMACs[strings.ToUpper(m.String())] = true
+				globalMACs[m.String()] = true
 			}
 		}
 	}
@@ -1144,7 +1158,7 @@ func (s *Scanner) processNDPResults(result *protocol.NDPResult) {
 	for ipStr, macs := range result.Entries {
 		ip := net.ParseIP(ipStr)
 		mac := macs[0]
-		macStr := strings.ToUpper(mac.String())
+		macStr := mac.String()
 
 		// Skip link-local if this MAC already has a global address
 		if ip != nil && ip.IsLinkLocalUnicast() && globalMACs[macStr] {
@@ -1169,7 +1183,7 @@ func (s *Scanner) processNDPResults(result *protocol.NDPResult) {
 			if len(devGroups) == 1 {
 				var macStrs, vendorStrs []string
 				for _, m := range macs {
-					macStrs = append(macStrs, strings.ToUpper(m.String()))
+					macStrs = append(macStrs, m.String())
 					if s.oui != nil {
 						vendorStrs = append(vendorStrs, s.oui.Lookup(m))
 					}
@@ -1222,7 +1236,7 @@ func (s *Scanner) processDHCPv6Results(servers []models.DHCPv6ServerInfo) {
 			entry.ServerIP = srv.ServerIP.String()
 		}
 		if srv.ServerMAC != nil {
-			entry.ServerMAC = strings.ToUpper(srv.ServerMAC.String())
+			entry.ServerMAC = srv.ServerMAC.String()
 			if s.oui != nil {
 				entry.Vendor = s.oui.Lookup(srv.ServerMAC)
 			}
