@@ -210,6 +210,8 @@ func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, su
 		// via the gateway, so the Ethernet source MAC is the gateway's MAC,
 		// not the actual host's MAC.
 		gwMACs := make(map[string]bool)
+		// Exclude our own MAC (ICMP replies from self or reflected traffic)
+		gwMACs[localMAC.String()] = true
 		result.Mu.Lock()
 		for _, sn := range subnets {
 			for _, gwSuffix := range []byte{1, 254} {
