@@ -11,7 +11,8 @@ A real-time network scanner and monitoring dashboard with a built-in web UI. Net
 - **NDP-based host discovery** — Discovers IPv6 hosts via Neighbor Discovery Protocol multicast solicitations
 - **IP conflict detection** — Identifies multiple MAC addresses claiming the same IP (both IPv4 and IPv6), distinguishing real conflicts from NIC bonding/teaming
 - **DHCP/DHCPv6 server detection** — Discovers DHCP and DHCPv6 servers on the network and reports offered IPs, subnet masks, routers, and DNS servers
-- **Hostname resolution** — Resolves hostnames via DNS PTR, NetBIOS, mDNS, SNMP sysName, TLS certificates, and SMTP banners. In IPv6-only mode, uses internal ARP to share hostnames via MAC address matching
+- **Hostname resolution** — Resolves hostnames via DNS PTR, NetBIOS, mDNS, SNMP sysName, TLS certificates, SMTP banners, and LLDP/CDP cross-reference. In IPv6-only mode, uses internal ARP to share hostnames via MAC address matching
+- **HTTP/HTTPS service detection** — After the initial scan, runs a background full 65535-port TCP scan on every host. Open ports are probed for HTTP/HTTPS services with automatic identification via HTML titles, `X-*-Version` headers, `Server` headers, and JSON API responses. Follows redirects up to 3 hops. Results are displayed incrementally with real-time progress tracking
 - **OUI vendor lookup** — Maps MAC addresses to hardware vendors using the IEEE OUI database
 - **Network protocol listeners**
   - **HSRP** (Hot Standby Router Protocol) — Detects Cisco HSRP v1/v2 advertisements
@@ -131,6 +132,7 @@ The web dashboard opens automatically at `http://localhost:9090` (or your chosen
    - New HSRP/VRRP/LLDP/CDP advertisements
    - ARP traffic anomalies indicating potential spoofing (IPv4)
    - NDP traffic anomalies indicating potential spoofing (IPv6)
+4. **Background HTTP/HTTPS scan** — Full TCP port scan (65535 ports) on each host, probing open ports for HTTP/HTTPS services. IPv4 hosts are scanned first, then IPv6. Results update incrementally in the web UI
 
 Packet capture uses Linux `AF_PACKET` raw sockets with kernel-level BPF filters, bypassing the need for libpcap. Packet parsing is handled by `gopacket/layers` (pure Go).
 

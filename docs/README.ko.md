@@ -9,7 +9,8 @@
 - **NDP 기반 호스트 탐색** — Neighbor Discovery Protocol 멀티캐스트 요청으로 IPv6 호스트를 발견합니다
 - **IP 충돌 감지** — 같은 IP를 사용하는 여러 MAC 주소를 식별하며 (IPv4/IPv6 모두), NIC 본딩/티밍과 실제 충돌을 구분합니다
 - **DHCP/DHCPv6 서버 탐지** — 네트워크의 DHCP 및 DHCPv6 서버를 발견하고 제공 IP, 서브넷 마스크, 라우터, DNS 서버 정보를 표시합니다
-- **호스트명 해석** — DNS PTR, NetBIOS, mDNS, SNMP sysName, TLS 인증서, SMTP 배너를 통해 호스트명을 해석합니다. IPv6 전용 모드에서는 내부 ARP를 사용하여 MAC 주소 매칭으로 호스트명을 공유합니다
+- **호스트명 해석** — DNS PTR, NetBIOS, mDNS, SNMP sysName, TLS 인증서, SMTP 배너, LLDP/CDP 교차 참조를 통해 호스트명을 해석합니다. IPv6 전용 모드에서는 내부 ARP를 사용하여 MAC 주소 매칭으로 호스트명을 공유합니다
+- **HTTP/HTTPS 서비스 탐지** — 초기 스캔 후 백그라운드에서 각 호스트의 전체 65535 TCP 포트를 스캔합니다. 열린 포트에 HTTP/HTTPS 프로빙을 수행하여 HTML title, `X-*-Version` 헤더, `Server` 헤더, JSON API 응답으로 서비스를 자동 식별합니다. 리다이렉트를 최대 3홉까지 추적합니다. 결과는 실시간 진행 상태와 함께 점진적으로 표시됩니다
 - **OUI 벤더 조회** — IEEE OUI 데이터베이스를 사용하여 MAC 주소를 하드웨어 벤더에 매핑합니다
 - **네트워크 프로토콜 리스너**
   - **HSRP** (Hot Standby Router Protocol) — Cisco HSRP v1/v2 광고 감지
@@ -129,6 +130,7 @@ sudo ./net-finder -auto=false
    - 새로운 HSRP/VRRP/LLDP/CDP 광고
    - 스푸핑 가능성을 나타내는 ARP 트래픽 이상 (IPv4)
    - 스푸핑 가능성을 나타내는 NDP 트래픽 이상 (IPv6)
+4. **백그라운드 HTTP/HTTPS 스캔** — 각 호스트의 전체 TCP 포트(65535개)를 스캔하고, 열린 포트에 HTTP/HTTPS 서비스를 프로빙합니다. IPv4 호스트를 먼저 스캔한 후 IPv6를 진행합니다. 결과는 웹 UI에 점진적으로 업데이트됩니다
 
 패킷 캡처는 Linux `AF_PACKET` raw socket과 커널 수준 BPF 필터를 사용하여 libpcap 없이 동작합니다. 패킷 파싱은 `gopacket/layers` (순수 Go)로 처리합니다.
 
