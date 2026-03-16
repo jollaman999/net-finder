@@ -655,21 +655,17 @@ func resolveSMTP(ip string) string {
 	return hostname
 }
 
-// resolveHTTP scans all TCP ports on an IP and probes HTTP on open ports concurrently.
-// Port scan and HTTP probing share the same semaphore and run in parallel —
-// as soon as a port is found open, HTTP probing starts immediately.
+// resolveHTTP scans all TCP ports on an IP, then probes HTTP on open ports.
 func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
-	var mu sync.Mutex
-	var httpResults, httpsResults []webProbeResult
-	var probeWg sync.WaitGroup
-
-	// Port scan: when a port is found open, immediately start HTTP probe
+	// Phase 1: Full port scan
+	type portResult struct{ port int }
+	results := make(chan portResult, 256)
 	var scanWg sync.WaitGroup
+
 	for port := 1; port <= 65535; port++ {
 		select {
 		case <-stopCh:
 			scanWg.Wait()
-			probeWg.Wait()
 			return ""
 		case sem <- struct{}{}:
 		}
@@ -677,33 +673,43 @@ func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
 		scanWg.Add(1)
 		go func(p int) {
 			defer func() { <-sem; scanWg.Done() }()
-			addr := net.JoinHostPort(ip, strconv.Itoa(p))
-			conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+			conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, strconv.Itoa(p)), 200*time.Millisecond)
 			if err != nil {
 				return
 			}
 			conn.Close()
-
-			// Open port found — start HTTP probe immediately
-			portStr := strconv.Itoa(p)
-			probeWg.Add(1)
-			go func() {
-				defer probeWg.Done()
-				if r := tryHTTP(ip, portStr); r != nil {
-					mu.Lock()
-					if r.isTLS {
-						httpsResults = append(httpsResults, *r)
-					} else {
-						httpResults = append(httpResults, *r)
-					}
-					mu.Unlock()
-				}
-			}()
+			results <- portResult{p}
 		}(port)
 	}
 
-	scanWg.Wait()
-	probeWg.Wait()
+	go func() { scanWg.Wait(); close(results) }()
+
+	var openPorts []int
+	for r := range results {
+		openPorts = append(openPorts, r.port)
+	}
+	sort.Ints(openPorts)
+
+	if len(openPorts) == 0 {
+		return ""
+	}
+
+	// Phase 2: HTTP probe on open ports (sequential — few ports)
+	var httpResults, httpsResults []webProbeResult
+	for _, p := range openPorts {
+		select {
+		case <-stopCh:
+			return ""
+		default:
+		}
+		if r := tryHTTP(ip, strconv.Itoa(p)); r != nil {
+			if r.isTLS {
+				httpsResults = append(httpsResults, *r)
+			} else {
+				httpResults = append(httpResults, *r)
+			}
+		}
+	}
 
 	// Sort by port number
 	sortResults := func(rs []webProbeResult) {
@@ -963,8 +969,15 @@ func extractTitle(body, ip string) string {
 }
 
 // extractFromXHeaders auto-detects X-*-Version, X-*-Build, X-*-Name style headers.
-// Extracts the service name from the header key itself.
+// Prioritizes Version headers over Build headers.
 func extractFromXHeaders(headers string) string {
+	type match struct {
+		name     string
+		val      string
+		priority int // 0=version (highest), 1=build, 2=name
+	}
+	var best *match
+
 	for _, line := range strings.Split(headers, "\r\n") {
 		lineLower := strings.ToLower(line)
 		if !strings.HasPrefix(lineLower, "x-") {
@@ -978,20 +991,19 @@ func extractFromXHeaders(headers string) string {
 		val := strings.TrimSpace(line[colonIdx+1:])
 		keyLower := strings.ToLower(key)
 
-		// Match X-*-Version, X-*-Build, X-*-Api-Version patterns
-		isVersion := strings.HasSuffix(keyLower, "-version") ||
-			strings.HasSuffix(keyLower, "-build") ||
-			strings.HasSuffix(keyLower, "-api-version")
-		// Match X-*-Name patterns
-		isName := strings.HasSuffix(keyLower, "-name") && !strings.Contains(keyLower, "header")
-
-		if !isVersion && !isName {
+		var priority int
+		if strings.HasSuffix(keyLower, "-version") || strings.HasSuffix(keyLower, "-api-version") {
+			priority = 0
+		} else if strings.HasSuffix(keyLower, "-build") {
+			priority = 1
+		} else if strings.HasSuffix(keyLower, "-name") && !strings.Contains(keyLower, "header") {
+			priority = 2
+		} else {
 			continue
 		}
 
-		// Extract service name from header key: "X-Influxdb-Version" → "Influxdb"
+		// Extract service name from header key
 		name := key[2:] // strip "X-"
-		// Remove suffix
 		for _, suffix := range []string{"-Version", "-version", "-Build", "-build",
 			"-Api-Version", "-api-version", "-Name", "-name"} {
 			if strings.HasSuffix(name, suffix) {
@@ -1001,18 +1013,22 @@ func extractFromXHeaders(headers string) string {
 		}
 		name = strings.ReplaceAll(name, "-", " ")
 		name = strings.TrimSpace(name)
-
-		if name == "" {
+		if name == "" || val == "" {
 			continue
 		}
-		if isVersion && val != "" {
-			return fmt.Sprintf("%s %s", name, val)
-		}
-		if isName && val != "" {
-			return val
+
+		if best == nil || priority < best.priority {
+			best = &match{name: name, val: val, priority: priority}
 		}
 	}
-	return ""
+
+	if best == nil {
+		return ""
+	}
+	if best.priority <= 1 { // version or build
+		return fmt.Sprintf("%s %s", best.name, best.val)
+	}
+	return best.val // name
 }
 
 // extractFromServer uses the Server header if it's not a generic web server.
