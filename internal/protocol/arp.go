@@ -271,12 +271,33 @@ func ProbeIPs(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, s
 		return localIP
 	}
 
-	for round := 0; round < 2; round++ {
+	// Round 1: full sweep
+	for _, ip := range ips {
+		sendARPRequest(sock, iface, srcFor(ip), localMAC, ip)
+		time.Sleep(500 * time.Microsecond)
+	}
+	time.Sleep(timeout)
+
+	// Rounds 2-3: retry only missing IPs
+	for retry := 0; retry < 2; retry++ {
+		var missing []net.IP
+		result.Mu.Lock()
 		for _, ip := range ips {
-			sendARPRequest(sock, iface, srcFor(ip), localMAC, ip)
-			time.Sleep(500 * time.Microsecond)
+			if _, ok := result.Entries[ip.String()]; !ok {
+				missing = append(missing, ip)
+			}
 		}
-		time.Sleep(timeout / 2)
+		result.Mu.Unlock()
+
+		if len(missing) == 0 {
+			break
+		}
+
+		for _, ip := range missing {
+			sendARPRequest(sock, iface, srcFor(ip), localMAC, ip)
+			time.Sleep(1 * time.Millisecond)
+		}
+		time.Sleep(timeout)
 	}
 
 	close(done)

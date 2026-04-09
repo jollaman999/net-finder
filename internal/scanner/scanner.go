@@ -50,6 +50,10 @@ type Scanner struct {
 	noteScanDone    int
 	noteScanRunning bool
 	noteScanMu      sync.RWMutex
+
+	// Per-host miss count for liveness tracking (IPv4)
+	hostMissCount map[string]int
+	hostMissMu    sync.Mutex
 }
 
 // NewScanner creates a new Scanner instance
@@ -73,6 +77,7 @@ func NewScanner(iface *net.Interface, localIP, localIPv6, linkLocalIPv6 net.IP,
 		hostnameMap:    make(map[string]string),
 		emailedARPKeys: make(map[string]bool),
 		emailedNDPKeys: make(map[string]bool),
+		hostMissCount:  make(map[string]int),
 	}
 }
 
@@ -1028,30 +1033,51 @@ func (s *Scanner) backgroundProtocolListeners() {
 	}
 }
 
-// reverifyConflicts probes each known conflict IP and removes entries that
-// are no longer in conflict (only one MAC currently responds).
-// Also clears stale ARPAlerts whose newMAC matches the only remaining MAC.
-func (s *Scanner) reverifyConflicts() {
-	s.state.Mu.RLock()
-	if len(s.state.Conflicts) == 0 {
-		s.state.Mu.RUnlock()
+// reverifyHostsAndConflicts probes all known IPv4 hosts (and conflicts) and:
+//   - removes conflict entries that resolved to a single MAC
+//   - removes hosts that have not responded for `maxMisses` consecutive cycles
+//   - clears ARPAlerts for resolved IPs
+const maxHostMisses = 5
+
+func (s *Scanner) reverifyHostsAndConflicts() {
+	if s.localIP == nil {
 		return
 	}
+
+	s.state.Mu.RLock()
 	var ips []net.IP
+	for _, h := range s.state.Hosts {
+		if h.IPVersion != 4 {
+			continue
+		}
+		if ip := net.ParseIP(h.IP); ip != nil {
+			ips = append(ips, ip)
+		}
+	}
 	for _, c := range s.state.Conflicts {
 		if ip := net.ParseIP(c.IP); ip != nil {
-			ips = append(ips, ip)
+			// Avoid duplicate
+			already := false
+			for _, x := range ips {
+				if x.Equal(ip) {
+					already = true
+					break
+				}
+			}
+			if !already {
+				ips = append(ips, ip)
+			}
 		}
 	}
 	s.state.Mu.RUnlock()
 
-	if len(ips) == 0 || s.localIP == nil {
+	if len(ips) == 0 {
 		return
 	}
 
-	result, err := protocol.ProbeIPs(s.iface, s.localIP, s.localMAC, s.subnets, ips, 1*time.Second)
+	result, err := protocol.ProbeIPs(s.iface, s.localIP, s.localMAC, s.subnets, ips, 2*time.Second)
 	if err != nil {
-		log.Printf("conflict reverify error: %v", err)
+		log.Printf("reverify error: %v", err)
 		return
 	}
 
@@ -1069,12 +1095,30 @@ func (s *Scanner) reverifyConflicts() {
 	s.state.Mu.Lock()
 	defer s.state.Mu.Unlock()
 
-	var keptConflicts []models.ConflictEntry
+	// Update miss counts for IPv4 hosts and decide removals
+	s.hostMissMu.Lock()
+	removeHost := make(map[string]bool)
+	for _, h := range s.state.Hosts {
+		if h.IPVersion != 4 {
+			continue
+		}
+		if _, alive := currentMACs[h.IP]; alive {
+			delete(s.hostMissCount, h.IP)
+			continue
+		}
+		s.hostMissCount[h.IP]++
+		if s.hostMissCount[h.IP] >= maxHostMisses {
+			removeHost[h.IP] = true
+			delete(s.hostMissCount, h.IP)
+		}
+	}
+	s.hostMissMu.Unlock()
+
+	// Resolve conflicts: keep if multiple MACs still respond, or if we got no response at all
 	resolved := make(map[string]bool)
+	var keptConflicts []models.ConflictEntry
 	for _, c := range s.state.Conflicts {
 		set, probed := currentMACs[c.IP]
-		// Keep the conflict if we couldn't probe it (no response at all),
-		// or if it still has multiple distinct MACs responding.
 		if !probed || len(set) >= 2 {
 			keptConflicts = append(keptConflicts, c)
 			continue
@@ -1082,21 +1126,31 @@ func (s *Scanner) reverifyConflicts() {
 		resolved[c.IP] = true
 	}
 
-	if len(resolved) == 0 {
-		return
-	}
-	s.state.Conflicts = keptConflicts
-
-	// Drop ARPAlerts for resolved IPs
-	var keptAlerts []models.ARPSpoofAlert
-	for _, a := range s.state.ARPAlerts {
-		if resolved[a.IP] {
-			delete(s.emailedARPKeys, a.IP+":"+a.NewMAC)
-			continue
+	// Apply host removals
+	if len(removeHost) > 0 {
+		var keptHosts []models.HostEntry
+		for _, h := range s.state.Hosts {
+			if removeHost[h.IP] {
+				continue
+			}
+			keptHosts = append(keptHosts, h)
 		}
-		keptAlerts = append(keptAlerts, a)
+		s.state.Hosts = keptHosts
 	}
-	s.state.ARPAlerts = keptAlerts
+
+	// Apply conflict removals
+	if len(resolved) > 0 {
+		s.state.Conflicts = keptConflicts
+		var keptAlerts []models.ARPSpoofAlert
+		for _, a := range s.state.ARPAlerts {
+			if resolved[a.IP] {
+				delete(s.emailedARPKeys, a.IP+":"+a.NewMAC)
+				continue
+			}
+			keptAlerts = append(keptAlerts, a)
+		}
+		s.state.ARPAlerts = keptAlerts
+	}
 }
 
 // backgroundARPMonitor continuously monitors ARP traffic for spoofing
@@ -1136,10 +1190,10 @@ func (s *Scanner) backgroundARPMonitor() {
 		default:
 		}
 
-		// Every 6 cycles (~30s), re-verify existing conflicts
+		// Every 6 cycles (~30s), re-verify hosts and conflicts
 		cycle++
 		if cycle%6 == 0 {
-			s.reverifyConflicts()
+			s.reverifyHostsAndConflicts()
 		}
 
 		alerts, err := protocol.MonitorARP(s.iface.Name, baseline, gatewayIP, 5*time.Second, s.bgStopCh)
