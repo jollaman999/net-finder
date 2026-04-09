@@ -232,6 +232,58 @@ func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, su
 	return result, nil
 }
 
+// ProbeIPs sends ARP requests for a small set of IPs and returns observed MACs per IP.
+// Used for quick re-verification of conflicts and host liveness.
+func ProbeIPs(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, subnets []*net.IPNet, ips []net.IP, timeout time.Duration) (*ARPResult, error) {
+	if len(ips) == 0 {
+		return NewARPResult(), nil
+	}
+
+	sock, err := netutil.NewRawSocket(iface.Name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open socket: %v", err)
+	}
+	defer sock.Close()
+
+	if err := sock.SetBPFFilter(netutil.BPFFilterARP()); err != nil {
+		return nil, fmt.Errorf("failed to set BPF filter: %v", err)
+	}
+
+	result := NewARPResult()
+	done := make(chan struct{})
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		readARPResponses(sock, result, done)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Resolve source IP per target based on subnet
+	srcFor := func(ip net.IP) net.IP {
+		for _, sn := range subnets {
+			if sn.Contains(ip) {
+				return subnetSourceIP(sn, localIP)
+			}
+		}
+		return localIP
+	}
+
+	for round := 0; round < 2; round++ {
+		for _, ip := range ips {
+			sendARPRequest(sock, iface, srcFor(ip), localMAC, ip)
+			time.Sleep(500 * time.Microsecond)
+		}
+		time.Sleep(timeout / 2)
+	}
+
+	close(done)
+	wg.Wait()
+	return result, nil
+}
+
 func sendARPRequest(sock *netutil.RawSocket, iface *net.Interface, srcIP net.IP, srcMAC net.HardwareAddr, dstIP net.IP) error {
 	eth := layers.Ethernet{
 		SrcMAC:       srcMAC,

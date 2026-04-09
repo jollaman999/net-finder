@@ -1028,6 +1028,77 @@ func (s *Scanner) backgroundProtocolListeners() {
 	}
 }
 
+// reverifyConflicts probes each known conflict IP and removes entries that
+// are no longer in conflict (only one MAC currently responds).
+// Also clears stale ARPAlerts whose newMAC matches the only remaining MAC.
+func (s *Scanner) reverifyConflicts() {
+	s.state.Mu.RLock()
+	if len(s.state.Conflicts) == 0 {
+		s.state.Mu.RUnlock()
+		return
+	}
+	var ips []net.IP
+	for _, c := range s.state.Conflicts {
+		if ip := net.ParseIP(c.IP); ip != nil {
+			ips = append(ips, ip)
+		}
+	}
+	s.state.Mu.RUnlock()
+
+	if len(ips) == 0 || s.localIP == nil {
+		return
+	}
+
+	result, err := protocol.ProbeIPs(s.iface, s.localIP, s.localMAC, s.subnets, ips, 1*time.Second)
+	if err != nil {
+		log.Printf("conflict reverify error: %v", err)
+		return
+	}
+
+	result.Mu.Lock()
+	currentMACs := make(map[string]map[string]bool)
+	for ipStr, macs := range result.Entries {
+		set := make(map[string]bool)
+		for _, m := range macs {
+			set[strings.ToLower(m.String())] = true
+		}
+		currentMACs[ipStr] = set
+	}
+	result.Mu.Unlock()
+
+	s.state.Mu.Lock()
+	defer s.state.Mu.Unlock()
+
+	var keptConflicts []models.ConflictEntry
+	resolved := make(map[string]bool)
+	for _, c := range s.state.Conflicts {
+		set, probed := currentMACs[c.IP]
+		// Keep the conflict if we couldn't probe it (no response at all),
+		// or if it still has multiple distinct MACs responding.
+		if !probed || len(set) >= 2 {
+			keptConflicts = append(keptConflicts, c)
+			continue
+		}
+		resolved[c.IP] = true
+	}
+
+	if len(resolved) == 0 {
+		return
+	}
+	s.state.Conflicts = keptConflicts
+
+	// Drop ARPAlerts for resolved IPs
+	var keptAlerts []models.ARPSpoofAlert
+	for _, a := range s.state.ARPAlerts {
+		if resolved[a.IP] {
+			delete(s.emailedARPKeys, a.IP+":"+a.NewMAC)
+			continue
+		}
+		keptAlerts = append(keptAlerts, a)
+	}
+	s.state.ARPAlerts = keptAlerts
+}
+
 // backgroundARPMonitor continuously monitors ARP traffic for spoofing
 func (s *Scanner) backgroundARPMonitor() {
 	if s.arpResult == nil {
@@ -1057,11 +1128,18 @@ func (s *Scanner) backgroundARPMonitor() {
 		s.state.Mu.RUnlock()
 	}
 
+	cycle := 0
 	for {
 		select {
 		case <-s.bgStopCh:
 			return
 		default:
+		}
+
+		// Every 6 cycles (~30s), re-verify existing conflicts
+		cycle++
+		if cycle%6 == 0 {
+			s.reverifyConflicts()
 		}
 
 		alerts, err := protocol.MonitorARP(s.iface.Name, baseline, gatewayIP, 5*time.Second, s.bgStopCh)
