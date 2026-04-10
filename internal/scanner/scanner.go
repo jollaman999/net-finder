@@ -1040,9 +1040,66 @@ func (s *Scanner) backgroundProtocolListeners() {
 const maxHostMisses = 5
 
 func (s *Scanner) reverifyHostsAndConflicts() {
-	if s.localIP == nil {
+	if s.localIP != nil {
+		s.reverifyIPv4()
+	}
+	if s.linkLocalIPv6 != nil {
+		s.reverifyIPv6()
+	}
+}
+
+func (s *Scanner) reverifyIPv6() {
+	// Send NDP multicast and collect responses
+	ndpResult, err := protocol.NDPScan(s.iface, s.linkLocalIPv6, s.localMAC, s.subnetsV6, 2*time.Second)
+	if err != nil {
 		return
 	}
+
+	ndpResult.Mu.Lock()
+	aliveV6 := make(map[string]bool)
+	for ipStr := range ndpResult.Entries {
+		aliveV6[ipStr] = true
+	}
+	ndpResult.Mu.Unlock()
+
+	s.state.Mu.Lock()
+	defer s.state.Mu.Unlock()
+
+	s.hostMissMu.Lock()
+	var removeHost []string
+	for _, h := range s.state.Hosts {
+		if h.IPVersion != 6 {
+			continue
+		}
+		if aliveV6[h.IP] {
+			delete(s.hostMissCount, h.IP)
+			continue
+		}
+		s.hostMissCount[h.IP]++
+		if s.hostMissCount[h.IP] >= maxHostMisses {
+			removeHost = append(removeHost, h.IP)
+			delete(s.hostMissCount, h.IP)
+		}
+	}
+	s.hostMissMu.Unlock()
+
+	if len(removeHost) > 0 {
+		rm := make(map[string]bool)
+		for _, ip := range removeHost {
+			rm[ip] = true
+		}
+		var kept []models.HostEntry
+		for _, h := range s.state.Hosts {
+			if rm[h.IP] {
+				continue
+			}
+			kept = append(kept, h)
+		}
+		s.state.Hosts = kept
+	}
+}
+
+func (s *Scanner) reverifyIPv4() {
 
 	s.state.Mu.RLock()
 	var ips []net.IP
