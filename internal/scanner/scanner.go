@@ -1174,6 +1174,7 @@ func (s *Scanner) reverifyIPv4() {
 	// Resolve conflicts: keep if multiple MACs still respond, or if we got no response at all
 	resolved := make(map[string]bool)
 	var keptConflicts []models.ConflictEntry
+	var resolvedEntries []models.ConflictResolvedEntry
 	for _, c := range s.state.Conflicts {
 		set, probed := currentMACs[c.IP]
 		if !probed || len(set) >= 2 {
@@ -1181,6 +1182,45 @@ func (s *Scanner) reverifyIPv4() {
 			continue
 		}
 		resolved[c.IP] = true
+
+		// Build resolved entry with current MAC info
+		var curMAC, curVendor string
+		for m := range set {
+			curMAC = m
+			if s.oui != nil {
+				if hw, err := net.ParseMAC(m); err == nil {
+					curVendor = s.oui.Lookup(hw)
+				}
+			}
+			break
+		}
+		// Find where removed MACs went (new IP from host list)
+		removedNewIPs := make(map[string]string)
+		curLower := strings.ToLower(curMAC)
+		for _, m := range c.MACs {
+			if strings.ToLower(m) == curLower {
+				continue
+			}
+			// Look up this MAC in host list for its current IP
+			mLower := strings.ToLower(m)
+			for _, h := range s.state.Hosts {
+				if strings.ToLower(h.MAC) == mLower && h.IP != c.IP {
+					removedNewIPs[m] = h.IP
+					break
+				}
+			}
+		}
+
+		resolvedEntries = append(resolvedEntries, models.ConflictResolvedEntry{
+			IP:            c.IP,
+			Hostname:      c.Hostname,
+			PrevMACs:      c.MACs,
+			PrevVendors:   c.Vendors,
+			CurrentMAC:    curMAC,
+			CurrentVendor: curVendor,
+			RemovedNewIPs: removedNewIPs,
+			Subnet:        c.Subnet,
+		})
 	}
 
 	// Apply host removals
@@ -1195,7 +1235,7 @@ func (s *Scanner) reverifyIPv4() {
 		s.state.Hosts = keptHosts
 	}
 
-	// Apply conflict removals
+	// Apply conflict removals and send resolved alerts
 	if len(resolved) > 0 {
 		s.state.Conflicts = keptConflicts
 		var keptAlerts []models.ARPSpoofAlert
@@ -1207,6 +1247,10 @@ func (s *Scanner) reverifyIPv4() {
 			keptAlerts = append(keptAlerts, a)
 		}
 		s.state.ARPAlerts = keptAlerts
+
+		if s.alertMgr != nil && len(resolvedEntries) > 0 {
+			go s.alertMgr.SendConflictResolvedAlerts(resolvedEntries)
+		}
 	}
 }
 

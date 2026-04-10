@@ -57,6 +57,18 @@ type ConflictEntry struct {
 	Subnet   string   `json:"subnet"`
 }
 
+// ConflictResolvedEntry represents a resolved IP conflict
+type ConflictResolvedEntry struct {
+	IP            string            `json:"ip"`
+	Hostname      string            `json:"hostname"`
+	PrevMACs      []string          `json:"prevMACs"`
+	PrevVendors   []string          `json:"prevVendors"`
+	CurrentMAC    string            `json:"currentMAC"`
+	CurrentVendor string            `json:"currentVendor"`
+	RemovedNewIPs map[string]string `json:"removedNewIPs"` // removed MAC → new IP (empty if offline)
+	Subnet        string            `json:"subnet"`
+}
+
 // DHCPServerJSON is the JSON-friendly DHCP server info
 type DHCPServerJSON struct {
 	ServerIP   string   `json:"serverIP"`

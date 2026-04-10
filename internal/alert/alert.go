@@ -267,6 +267,114 @@ func (am *AlertManager) SendConflictAlerts(conflicts []models.ConflictEntry) {
 	}
 }
 
+// SendConflictResolvedAlerts sends email when conflicts are resolved
+func (am *AlertManager) SendConflictResolvedAlerts(resolved []models.ConflictResolvedEntry) {
+	if len(resolved) == 0 {
+		return
+	}
+	am.mu.RLock()
+	configs := make([]models.AlertConfig, len(am.configs))
+	copy(configs, am.configs)
+	am.mu.RUnlock()
+
+	if len(configs) == 0 {
+		return
+	}
+
+	bySubnet := make(map[string][]models.ConflictResolvedEntry)
+	var subnetOrder []string
+	for _, r := range resolved {
+		key := r.Subnet
+		if key == "" {
+			key = "(unknown)"
+		}
+		if _, ok := bySubnet[key]; !ok {
+			subnetOrder = append(subnetOrder, key)
+		}
+		bySubnet[key] = append(bySubnet[key], r)
+	}
+
+	for _, cfg := range configs {
+		for _, subnet := range subnetOrder {
+			entries := bySubnet[subnet]
+			if !matchesSubnetStr(cfg, subnet) || !hasEventForSubnet(cfg, "conflict_resolved", subnet) {
+				continue
+			}
+			subject := fmt.Sprintf("[Net Finder] IP Conflict Resolved — %s (%d)", subnet, len(entries))
+			body := buildConflictResolvedHTMLReport(subnet, entries)
+			if err := sendEmailHTML(cfg, subject, body); err != nil {
+				log.Printf("alert send failed [%s] %s: %v", cfg.ID, subnet, err)
+			}
+		}
+	}
+}
+
+func buildConflictResolvedHTMLReport(subnet string, entries []models.ConflictResolvedEntry) string {
+	now := time.Now().Format("2006-01-02 15:04:05")
+
+	var b strings.Builder
+	b.WriteString(`<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f5f5">`)
+	b.WriteString(`<div style="max-width:800px;margin:20px auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1)">`)
+
+	// Header (green for resolved)
+	b.WriteString(`<div style="background:#2e7d32;color:#fff;padding:20px 24px">`)
+	b.WriteString(`<h2 style="margin:0 0 4px;font-size:18px">IP Conflict Resolved</h2>`)
+	b.WriteString(fmt.Sprintf(`<div style="font-size:13px;opacity:0.9">Subnet: <strong>%s</strong> &nbsp;|&nbsp; %d resolved &nbsp;|&nbsp; %s</div>`,
+		htmlEsc(subnet), len(entries), htmlEsc(now)))
+	b.WriteString(`</div>`)
+
+	// Each resolved conflict as a card
+	b.WriteString(`<div style="padding:16px 24px">`)
+	for i, r := range entries {
+		hostname := r.Hostname
+		if hostname == "" {
+			hostname = "-"
+		}
+		if i > 0 {
+			b.WriteString(`<hr style="border:none;border-top:1px solid #eee;margin:20px 0">`)
+		}
+
+		// IP + hostname header
+		b.WriteString(fmt.Sprintf(`<div style="margin-bottom:12px"><span style="font-size:16px;font-weight:700">%s</span>`, htmlEsc(r.IP)))
+		if r.Hostname != "" {
+			b.WriteString(fmt.Sprintf(` <span style="color:#666;font-size:14px">(%s)</span>`, htmlEsc(r.Hostname)))
+		}
+		b.WriteString(`</div>`)
+
+		// Conflict history: which MACs were conflicting
+		b.WriteString(`<div style="margin-bottom:10px;font-size:13px;color:#666;font-weight:600">Conflicting MACs:</div>`)
+		b.WriteString(`<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:12px">`)
+		currentLower := strings.ToLower(r.CurrentMAC)
+		for i, m := range r.PrevMACs {
+			v := ""
+			if i < len(r.PrevVendors) {
+				v = r.PrevVendors[i]
+			}
+			isActive := strings.ToLower(m) == currentLower
+			if isActive {
+				// This MAC stays on the original IP
+				b.WriteString(fmt.Sprintf(`<tr><td style="padding:4px 8px;width:24px"><span style="color:#1565c0">&#9679;</span></td><td style="padding:4px 8px;font-family:'Courier New',monospace;font-weight:600">%s</td><td style="padding:4px 8px">%s</td><td style="padding:4px 8px;color:#1565c0;font-size:12px">&rarr; %s (unchanged)</td></tr>`,
+					htmlEsc(m), htmlEsc(v), htmlEsc(r.IP)))
+			} else {
+				// This MAC was removed — show where it went
+				newIP := r.RemovedNewIPs[m]
+				dest := "offline"
+				if newIP != "" {
+					dest = newIP
+				}
+				b.WriteString(fmt.Sprintf(`<tr><td style="padding:4px 8px;width:24px"><span style="color:#2e7d32">&#10004;</span></td><td style="padding:4px 8px;font-family:'Courier New',monospace;color:#999;text-decoration:line-through">%s</td><td style="padding:4px 8px;color:#999">%s</td><td style="padding:4px 8px;color:#2e7d32;font-size:12px;font-weight:600">&rarr; %s</td></tr>`,
+					htmlEsc(m), htmlEsc(v), htmlEsc(dest)))
+			}
+		}
+		b.WriteString(`</table>`)
+	}
+	b.WriteString(`</div>`)
+
+	b.WriteString(`<div style="padding:12px 24px;background:#f5f5f5;font-size:12px;color:#999;text-align:center">Sent by <strong>Net Finder</strong></div>`)
+	b.WriteString(`</div></body></html>`)
+	return b.String()
+}
+
 // TestAlert sends test alert emails based on cfg.Events
 func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 	sent := 0
@@ -279,6 +387,19 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 		}
 		subject := fmt.Sprintf("[Net Finder] IP Conflict — %s (%d)", "192.168.1.0/24", len(testConflicts))
 		body := buildHTMLReport("192.168.1.0/24", testConflicts)
+		if err := sendEmailHTML(cfg, subject, body); err != nil {
+			lastErr = err
+		} else {
+			sent++
+		}
+	}
+
+	if hasEventV4(cfg, "conflict_resolved") {
+		testResolved := []models.ConflictResolvedEntry{
+			{IP: "192.168.1.100", PrevMACs: []string{"AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02"}, PrevVendors: []string{"Vendor A", "Vendor B"}, CurrentMAC: "AA:BB:CC:DD:EE:01", CurrentVendor: "Vendor A", RemovedNewIPs: map[string]string{"AA:BB:CC:DD:EE:02": "192.168.1.150"}, Subnet: "192.168.1.0/24"},
+		}
+		subject := fmt.Sprintf("[Net Finder] IP Conflict Resolved — %s (%d)", "192.168.1.0/24", len(testResolved))
+		body := buildConflictResolvedHTMLReport("192.168.1.0/24", testResolved)
 		if err := sendEmailHTML(cfg, subject, body); err != nil {
 			lastErr = err
 		} else {

@@ -991,6 +991,7 @@ const i18n = {
     alert_events_all: 'All events',
     alert_event_hosts: 'Host Discovery',
     alert_event_conflicts: 'IP Conflicts',
+    alert_event_conflict_resolved: 'IP Conflict Resolved',
     alert_event_dhcp: 'DHCP Servers',
     alert_event_hsrp_vrrp: 'HSRP/VRRP',
     alert_event_lldp_cdp: 'LLDP/CDP',
@@ -1120,6 +1121,7 @@ const i18n = {
     alert_events_all: '전체 이벤트',
     alert_event_hosts: '호스트 발견',
     alert_event_conflicts: 'IP 충돌',
+    alert_event_conflict_resolved: 'IP 충돌 해소',
     alert_event_dhcp: 'DHCP 서버 발견',
     alert_event_hsrp_vrrp: 'HSRP/VRRP 발견',
     alert_event_lldp_cdp: 'LLDP/CDP 발견',
@@ -1249,6 +1251,7 @@ const i18n = {
     alert_events_all: '全イベント',
     alert_event_hosts: 'ホスト検出',
     alert_event_conflicts: 'IP競合',
+    alert_event_conflict_resolved: 'IP競合解消',
     alert_event_dhcp: 'DHCPサーバー検出',
     alert_event_hsrp_vrrp: 'HSRP/VRRP検出',
     alert_event_lldp_cdp: 'LLDP/CDP検出',
@@ -1378,6 +1381,7 @@ const i18n = {
     alert_events_all: '所有事件',
     alert_event_hosts: '主机发现',
     alert_event_conflicts: 'IP冲突',
+    alert_event_conflict_resolved: 'IP冲突已解决',
     alert_event_dhcp: 'DHCP服务器发现',
     alert_event_hsrp_vrrp: 'HSRP/VRRP发现',
     alert_event_lldp_cdp: 'LLDP/CDP发现',
@@ -2286,10 +2290,10 @@ function updateAlertSubnetAllFor(ver) {
   }
 }
 
-const alertEventKeysV4 = ['hosts', 'conflicts', 'dhcp', 'hsrp_vrrp', 'lldp_cdp', 'arp_spoofing', 'dns_spoofing'];
-const alertEventKeysV6 = ['hosts', 'conflicts', 'dhcpv6', 'hsrp_vrrp', 'lldp_cdp', 'ndp_spoofing', 'dns_spoofing'];
+const alertEventKeysV4 = ['hosts', 'conflicts', 'conflict_resolved', 'dhcp', 'hsrp_vrrp', 'lldp_cdp', 'arp_spoofing', 'dns_spoofing'];
+const alertEventKeysV6 = ['hosts', 'conflicts', 'conflict_resolved', 'dhcpv6', 'hsrp_vrrp', 'lldp_cdp', 'ndp_spoofing', 'dns_spoofing'];
 
-const alertEventI18n = { hosts:'alert_event_hosts', conflicts:'alert_event_conflicts', dhcp:'alert_event_dhcp', dhcpv6:'alert_event_dhcpv6', hsrp_vrrp:'alert_event_hsrp_vrrp', lldp_cdp:'alert_event_lldp_cdp', arp_spoofing:'alert_event_arp', dns_spoofing:'alert_event_dns', ndp_spoofing:'alert_event_ndp' };
+const alertEventI18n = { hosts:'alert_event_hosts', conflicts:'alert_event_conflicts', conflict_resolved:'alert_event_conflict_resolved', dhcp:'alert_event_dhcp', dhcpv6:'alert_event_dhcpv6', hsrp_vrrp:'alert_event_hsrp_vrrp', lldp_cdp:'alert_event_lldp_cdp', arp_spoofing:'alert_event_arp', dns_spoofing:'alert_event_dns', ndp_spoofing:'alert_event_ndp' };
 
 function populateAlertEvents(selectedV4, selectedV6) {
   populateAlertEventsFor('v4', alertEventKeysV4, selectedV4);
