@@ -142,10 +142,10 @@ func resolveNetBIOS(ip string) string {
 
 	// NetBIOS Node Status Request for wildcard name "*"
 	query := make([]byte, 50)
-	binary.BigEndian.PutUint16(query[0:2], 0x1337)  // Transaction ID
-	binary.BigEndian.PutUint16(query[2:4], 0x0000)   // Flags
-	binary.BigEndian.PutUint16(query[4:6], 0x0001)   // Questions: 1
-	query[12] = 0x20                                   // Name length: 32
+	binary.BigEndian.PutUint16(query[0:2], 0x1337) // Transaction ID
+	binary.BigEndian.PutUint16(query[2:4], 0x0000) // Flags
+	binary.BigEndian.PutUint16(query[4:6], 0x0001) // Questions: 1
+	query[12] = 0x20                               // Name length: 32
 
 	// Encode wildcard name "*" + 15 null bytes
 	nbName := make([]byte, 16)
@@ -154,9 +154,9 @@ func resolveNetBIOS(ip string) string {
 		query[13+i*2] = byte('A') + (nbName[i] >> 4)
 		query[14+i*2] = byte('A') + (nbName[i] & 0x0F)
 	}
-	query[45] = 0x00                                   // Name terminator
-	binary.BigEndian.PutUint16(query[46:48], 0x0021)  // Type: NBSTAT
-	binary.BigEndian.PutUint16(query[48:50], 0x0001)  // Class: IN
+	query[45] = 0x00                                 // Name terminator
+	binary.BigEndian.PutUint16(query[46:48], 0x0021) // Type: NBSTAT
+	binary.BigEndian.PutUint16(query[48:50], 0x0001) // Class: IN
 
 	if _, err = conn.Write(query); err != nil {
 		return ""
@@ -694,20 +694,27 @@ func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
 		return ""
 	}
 
-	// Phase 2: HTTP probe on open ports (sequential — few ports)
+	// Phase 2: HTTP probe on open ports; ports that aren't HTTP are probed for
+	// well-known database services (sequential — few ports).
 	var httpResults, httpsResults []webProbeResult
+	var dbResults []dbProbeResult
 	for _, p := range openPorts {
 		select {
 		case <-stopCh:
 			return ""
 		default:
 		}
-		if r := tryHTTP(ip, strconv.Itoa(p)); r != nil {
+		ps := strconv.Itoa(p)
+		if r := tryHTTP(ip, ps); r != nil {
 			if r.isTLS {
 				httpsResults = append(httpsResults, *r)
 			} else {
 				httpResults = append(httpResults, *r)
 			}
+			continue
+		}
+		if d := tryDB(ip, ps); d != nil {
+			dbResults = append(dbResults, *d)
 		}
 	}
 
@@ -721,8 +728,13 @@ func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
 	}
 	sortResults(httpResults)
 	sortResults(httpsResults)
+	sort.Slice(dbResults, func(i, j int) bool {
+		pi, _ := strconv.Atoi(dbResults[i].port)
+		pj, _ := strconv.Atoi(dbResults[j].port)
+		return pi < pj
+	})
 
-	// Format: "HTTP name (port), name (port)\nHTTPS name (port), name (port)"
+	// Format: "HTTP name (port), ...\nHTTPS ...\nDB ..."
 	var lines []string
 	if len(httpResults) > 0 {
 		var items []string
@@ -738,6 +750,13 @@ func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
 		}
 		lines = append(lines, "HTTPS\t"+strings.Join(items, ", "))
 	}
+	if len(dbResults) > 0 {
+		var items []string
+		for _, d := range dbResults {
+			items = append(items, fmt.Sprintf("%s (%s)", d.name, d.port))
+		}
+		lines = append(lines, "DB\t"+strings.Join(items, ", "))
+	}
 	if len(lines) == 0 {
 		return ""
 	}
@@ -746,9 +765,237 @@ func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
 
 // webProbeResult holds the result of probing a single port
 type webProbeResult struct {
-	port   string
-	title  string
-	isTLS  bool
+	port  string
+	title string
+	isTLS bool
+}
+
+// dbProbeResult holds a detected database service on a port.
+type dbProbeResult struct {
+	port string
+	name string
+}
+
+// dbActiveProbePorts maps well-known DB ports to their probe protocol. Active
+// probes only run on these ports to keep the scan fast and avoid false
+// positives. MySQL/MariaDB are detected passively (banner) on any port.
+var dbActiveProbePorts = map[int]string{
+	5432:  "postgres",
+	5433:  "postgres",
+	6379:  "redis",
+	6380:  "redis",
+	11211: "memcached",
+	27017: "mongodb",
+	27018: "mongodb",
+	27019: "mongodb",
+}
+
+// tryDB probes a single open port for a well-known database service. It first
+// reads any server-sent banner (catches MySQL/MariaDB on any port), then, for
+// standard DB ports, sends a protocol-specific probe.
+func tryDB(ip, port string) *dbProbeResult {
+	if name := probeMySQLBanner(ip, port); name != "" {
+		return &dbProbeResult{port: port, name: name}
+	}
+
+	pnum, _ := strconv.Atoi(port)
+	var name string
+	switch dbActiveProbePorts[pnum] {
+	case "postgres":
+		name = probePostgres(ip, port)
+	case "redis":
+		name = probeRedis(ip, port)
+	case "memcached":
+		name = probeMemcached(ip, port)
+	case "mongodb":
+		name = probeMongoDB(ip, port)
+	}
+	if name != "" {
+		return &dbProbeResult{port: port, name: name}
+	}
+	return nil
+}
+
+// probeMySQLBanner reads the MySQL/MariaDB initial handshake (sent by the server
+// immediately on connect) and extracts the server version.
+func probeMySQLBanner(ip, port string) string {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	conn.SetReadDeadline(time.Now().Add(800 * time.Millisecond))
+	buf := make([]byte, 256)
+	n, err := conn.Read(buf)
+	if err != nil || n < 6 {
+		return ""
+	}
+	// Packet: [3-byte length][seq=0][protocol version=10][server version cstring]
+	if buf[3] != 0x00 || buf[4] != 0x0a {
+		return ""
+	}
+	seg := string(buf[5:n])
+	end := strings.IndexByte(seg, 0)
+	if end <= 0 {
+		return ""
+	}
+	ver := seg[:end]
+	if !isPrintableASCII(ver) {
+		return ""
+	}
+	if strings.Contains(strings.ToLower(ver), "mariadb") {
+		return "MariaDB " + ver
+	}
+	return "MySQL " + ver
+}
+
+// probePostgres sends an SSLRequest; PostgreSQL replies with a single 'S'/'N'.
+func probePostgres(ip, port string) string {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	// SSLRequest message: int32 length=8, int32 code=80877103.
+	req := make([]byte, 8)
+	binary.BigEndian.PutUint32(req[0:4], 8)
+	binary.BigEndian.PutUint32(req[4:8], 80877103)
+	conn.SetDeadline(time.Now().Add(1 * time.Second))
+	if _, err := conn.Write(req); err != nil {
+		return ""
+	}
+	resp := make([]byte, 1)
+	if _, err := conn.Read(resp); err != nil {
+		return ""
+	}
+	if resp[0] == 'S' || resp[0] == 'N' {
+		return "PostgreSQL"
+	}
+	return ""
+}
+
+// probeRedis sends PING; Redis replies +PONG or a -NOAUTH/-DENIED error. When
+// unauthenticated it additionally fetches the version via INFO.
+func probeRedis(ip, port string) string {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(1 * time.Second))
+	if _, err := conn.Write([]byte("PING\r\n")); err != nil {
+		return ""
+	}
+	buf := make([]byte, 128)
+	n, err := conn.Read(buf)
+	if err != nil || n == 0 {
+		return ""
+	}
+	resp := string(buf[:n])
+	if !strings.HasPrefix(resp, "+PONG") && !strings.Contains(resp, "NOAUTH") &&
+		!strings.Contains(resp, "protected mode") && !strings.Contains(resp, "DENIED") {
+		return ""
+	}
+	// Fetch version (works when no auth is required).
+	conn.SetDeadline(time.Now().Add(1 * time.Second))
+	if _, err := conn.Write([]byte("INFO server\r\n")); err == nil {
+		vbuf := make([]byte, 2048)
+		if vn, err := conn.Read(vbuf); err == nil && vn > 0 {
+			for _, line := range strings.Split(string(vbuf[:vn]), "\n") {
+				if strings.HasPrefix(line, "redis_version:") {
+					if v := strings.TrimSpace(strings.TrimPrefix(line, "redis_version:")); v != "" {
+						return "Redis " + v
+					}
+				}
+			}
+		}
+	}
+	return "Redis"
+}
+
+// probeMemcached sends "version"; memcached replies "VERSION x.y.z".
+func probeMemcached(ip, port string) string {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(1 * time.Second))
+	if _, err := conn.Write([]byte("version\r\n")); err != nil {
+		return ""
+	}
+	buf := make([]byte, 128)
+	n, err := conn.Read(buf)
+	if err != nil || n == 0 {
+		return ""
+	}
+	resp := strings.TrimSpace(string(buf[:n]))
+	if strings.HasPrefix(resp, "VERSION ") {
+		return "Memcached " + strings.TrimSpace(strings.TrimPrefix(resp, "VERSION "))
+	}
+	return ""
+}
+
+// probeMongoDB sends a legacy OP_QUERY {isMaster:1}; MongoDB replies with an
+// OP_REPLY whose BSON body contains isMaster/maxWireVersion markers.
+func probeMongoDB(ip, port string) string {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+
+	// BSON document { isMaster: 1 } (19 bytes).
+	bson := []byte{
+		0x13, 0x00, 0x00, 0x00, // document length
+		0x10,                                         // int32 element
+		'i', 's', 'M', 'a', 's', 't', 'e', 'r', 0x00, // field name
+		0x01, 0x00, 0x00, 0x00, // value = 1
+		0x00, // document terminator
+	}
+	coll := append([]byte("admin.$cmd"), 0x00)
+	body := make([]byte, 0, 12+len(coll)+len(bson))
+	body = append(body, 0, 0, 0, 0)             // flags
+	body = append(body, coll...)                // fullCollectionName
+	body = append(body, 0, 0, 0, 0)             // numberToSkip = 0
+	body = append(body, 0xff, 0xff, 0xff, 0xff) // numberToReturn = -1
+	body = append(body, bson...)
+
+	msg := make([]byte, 16+len(body))
+	binary.LittleEndian.PutUint32(msg[0:4], uint32(16+len(body))) // messageLength
+	binary.LittleEndian.PutUint32(msg[4:8], 1)                    // requestID
+	binary.LittleEndian.PutUint32(msg[8:12], 0)                   // responseTo
+	binary.LittleEndian.PutUint32(msg[12:16], 2004)               // opCode OP_QUERY
+	copy(msg[16:], body)
+
+	conn.SetDeadline(time.Now().Add(1 * time.Second))
+	if _, err := conn.Write(msg); err != nil {
+		return ""
+	}
+	buf := make([]byte, 512)
+	n, err := conn.Read(buf)
+	if err != nil || n < 16 {
+		return ""
+	}
+	resp := string(buf[:n])
+	if strings.Contains(resp, "ismaster") || strings.Contains(resp, "isWritablePrimary") ||
+		strings.Contains(resp, "maxWireVersion") || strings.Contains(resp, "topologyVersion") {
+		return "MongoDB"
+	}
+	return ""
+}
+
+// isPrintableASCII reports whether s is non-empty and all printable ASCII.
+func isPrintableASCII(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
 }
 
 // tryHTTP attempts an HTTP(S) request on a port, follows redirects, and returns title + TLS status.
