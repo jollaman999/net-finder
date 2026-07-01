@@ -1,9 +1,11 @@
 package scanner
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -18,12 +20,13 @@ import (
 
 // Scanner orchestrates all scanning operations
 type Scanner struct {
-	iface    *net.Interface
-	localIP  net.IP
-	localMAC net.HardwareAddr
-	subnets  []*net.IPNet
-	oui      *oui.OUIDatabase
-	alertMgr *alert.AlertManager
+	iface     *net.Interface
+	localIP   net.IP
+	localMAC  net.HardwareAddr
+	subnets   []*net.IPNet
+	subnetsMu sync.RWMutex // guards subnets (dynamically extended at runtime)
+	oui       *oui.OUIDatabase
+	alertMgr  *alert.AlertManager
 
 	// IPv6 fields
 	localIPv6     net.IP
@@ -145,16 +148,17 @@ func (s *Scanner) setProgress(phase string, percent, count int) {
 
 // GetStatus returns current scan status and progress
 func (s *Scanner) GetStatus() map[string]interface{} {
-	s.state.Mu.RLock()
-	defer s.state.Mu.RUnlock()
 	var subnetStrs []string
-	for _, sn := range s.subnets {
+	for _, sn := range s.snapshotSubnets() {
 		subnetStrs = append(subnetStrs, sn.String())
 	}
 	for _, sn := range s.subnetsV6 {
 		subnetStrs = append(subnetStrs, sn.String())
 	}
 	netutil.SortCIDRStrings(subnetStrs)
+
+	s.state.Mu.RLock()
+	defer s.state.Mu.RUnlock()
 	s.noteScanMu.RLock()
 	noteProgress := map[string]interface{}{
 		"running": s.noteScanRunning,
@@ -164,11 +168,11 @@ func (s *Scanner) GetStatus() map[string]interface{} {
 	s.noteScanMu.RUnlock()
 
 	return map[string]interface{}{
-		"status":       s.state.Status,
-		"progress":     s.state.Progress,
-		"subnets":      subnetStrs,
-		"ipMode":       s.ipMode,
-		"noteScan":     noteProgress,
+		"status":   s.state.Status,
+		"progress": s.state.Progress,
+		"subnets":  subnetStrs,
+		"ipMode":   s.ipMode,
+		"noteScan": noteProgress,
 	}
 }
 
@@ -399,7 +403,7 @@ func (s *Scanner) run() {
 		scanWg.Add(1)
 		go func() {
 			defer scanWg.Done()
-			result, err := protocol.ARPScan(s.iface, s.localIP, s.localMAC, s.subnets, 3*time.Second)
+			result, err := protocol.ARPScan(s.iface, s.localIP, s.localMAC, s.snapshotSubnets(), 3*time.Second)
 			if err != nil {
 				log.Printf("ARP scan failed: %v", err)
 				return
@@ -852,7 +856,6 @@ func (s *Scanner) backgroundResolveNotes() {
 	s.noteScanMu.Unlock()
 }
 
-
 // arpForHostnames does a quick ARP scan to get IPv4→MAC mappings for hostname resolution.
 // Used in IPv6-only mode so that hostnames resolved from IPv4 can be shared to IPv6 hosts via MAC.
 func (s *Scanner) arpForHostnames() []models.HostEntry {
@@ -911,17 +914,278 @@ func (s *Scanner) checkDNSSpoofing() {
 }
 
 func (s *Scanner) findSubnet(ip net.IP) string {
+	s.subnetsMu.RLock()
 	for _, subnet := range s.subnets {
 		if subnet.Contains(ip) {
+			s.subnetsMu.RUnlock()
 			return subnet.String()
 		}
 	}
+	s.subnetsMu.RUnlock()
 	for _, subnet := range s.subnetsV6 {
 		if subnet.Contains(ip) {
 			return subnet.String()
 		}
 	}
 	return ""
+}
+
+// snapshotSubnets returns a copy of the current IPv4 subnet list.
+// Callers must not hold s.state.Mu when calling (avoids lock-order inversion).
+func (s *Scanner) snapshotSubnets() []*net.IPNet {
+	s.subnetsMu.RLock()
+	defer s.subnetsMu.RUnlock()
+	out := make([]*net.IPNet, len(s.subnets))
+	copy(out, s.subnets)
+	return out
+}
+
+// ingestObserved processes passively-observed ARP traffic (IP->MAC) to:
+//   - add newly-appeared hosts to the host list, and
+//   - discover new /24 subnets not yet scanned, then actively sweep them.
+//
+// baseline (owned by the calling backgroundARPMonitor goroutine) is updated in
+// place so subsequent monitor cycles track the newly-learned hosts for spoofing.
+func (s *Scanner) ingestObserved(observed map[string]string, baseline map[string][]string) {
+	if len(observed) == 0 {
+		return
+	}
+
+	localMACStr := ""
+	if s.localMAC != nil {
+		localMACStr = s.localMAC.String()
+	}
+
+	// IPs already tracked as IPv4 hosts.
+	s.state.Mu.RLock()
+	known := make(map[string]bool)
+	for _, h := range s.state.Hosts {
+		if h.IPVersion == 4 {
+			known[h.IP] = true
+		}
+	}
+	s.state.Mu.RUnlock()
+
+	// ARP carries no netmask, so assume the same prefix length as our own
+	// interface (falls back to /24) rather than blindly hardcoding /24.
+	prefixLen := netutil.InterfaceIPv4PrefixLen(s.iface)
+
+	var newHosts []models.HostEntry
+	var newSubnets []*net.IPNet
+	seenNewSubnet := make(map[string]bool)
+
+	for ipStr, macStr := range observed {
+		ip := net.ParseIP(ipStr)
+		if ip == nil || ip.To4() == nil {
+			continue
+		}
+		// Skip our own IP and any traffic sourced from our own MAC
+		// (e.g. the synthesized source IPs we emit while sweeping).
+		if s.localIP != nil && ip.Equal(s.localIP) {
+			continue
+		}
+		if macStr == localMACStr {
+			continue
+		}
+
+		// Learn a new subnet if this IP falls outside every known subnet.
+		if s.findSubnet(ip) == "" {
+			base := ip.Mask(net.CIDRMask(prefixLen, 32))
+			cidr := fmt.Sprintf("%s/%d", base.String(), prefixLen)
+			if !seenNewSubnet[cidr] {
+				if _, ipnet, err := net.ParseCIDR(cidr); err == nil {
+					seenNewSubnet[cidr] = true
+					newSubnets = append(newSubnets, ipnet)
+				}
+			}
+		}
+
+		// Track baseline for future spoof detection.
+		if _, ok := baseline[ipStr]; !ok {
+			baseline[ipStr] = []string{macStr}
+		}
+
+		if known[ipStr] {
+			continue
+		}
+		known[ipStr] = true
+		vendor := "Unknown"
+		if mac, err := net.ParseMAC(macStr); err == nil && s.oui != nil {
+			vendor = s.oui.Lookup(mac)
+		}
+		newHosts = append(newHosts, models.HostEntry{
+			IP:        ipStr,
+			MAC:       macStr,
+			Vendor:    vendor,
+			IPVersion: 4,
+		})
+	}
+
+	// Register and sweep any newly-discovered subnets.
+	if len(newSubnets) > 0 {
+		s.subnetsMu.Lock()
+		s.subnets = append(s.subnets, newSubnets...)
+		s.subnetsMu.Unlock()
+		for _, sn := range newSubnets {
+			log.Printf("discovered new subnet via passive ARP: %s", sn)
+		}
+		go s.sweepSubnets(newSubnets)
+	}
+
+	// Add passively-observed hosts (subnet label may have just been learned).
+	if len(newHosts) > 0 {
+		for i := range newHosts {
+			newHosts[i].Subnet = s.findSubnet(net.ParseIP(newHosts[i].IP))
+		}
+		added := s.addHosts(newHosts)
+		if len(added) > 0 {
+			s.resolveHostnames()
+			if s.alertMgr != nil {
+				go s.alertMgr.SendHostAlerts(added)
+			}
+		}
+	}
+}
+
+// sweepSubnets actively ARP-scans the given subnets and merges the results into
+// the host list without disturbing hosts from other subnets.
+func (s *Scanner) sweepSubnets(subnets []*net.IPNet) {
+	if s.localIP == nil || len(subnets) == 0 {
+		return
+	}
+	result, err := protocol.ARPScan(s.iface, s.localIP, s.localMAC, subnets, 3*time.Second)
+	if err != nil {
+		log.Printf("new-subnet sweep failed: %v", err)
+		return
+	}
+	s.mergeARPResult(result)
+}
+
+// mergeARPResult converts an ARPResult into hosts/conflicts and merges them into
+// the existing state additively (unlike processARPResults, which rebuilds the
+// whole IPv4 host list). Only newly-added entries trigger alerts.
+func (s *Scanner) mergeARPResult(result *protocol.ARPResult) {
+	result.Mu.Lock()
+	var hosts []models.HostEntry
+	var conflicts []models.ConflictEntry
+	for ipStr, macs := range result.Entries {
+		ip := net.ParseIP(ipStr)
+		subnet := s.findSubnet(ip)
+		mac := macs[0]
+		vendor := "Unknown"
+		if s.oui != nil {
+			vendor = s.oui.Lookup(mac)
+		}
+		host := models.HostEntry{
+			IP:        ipStr,
+			MAC:       mac.String(),
+			Vendor:    vendor,
+			Subnet:    subnet,
+			IPVersion: 4,
+		}
+		if len(macs) > 1 {
+			devGroups := netutil.GroupMACsByDevice(macs)
+			var macStrs, vendorStrs []string
+			for _, m := range macs {
+				macStrs = append(macStrs, m.String())
+				if s.oui != nil {
+					vendorStrs = append(vendorStrs, s.oui.Lookup(m))
+				}
+			}
+			if len(devGroups) == 1 {
+				host.IsBond = true
+				host.BondMACs = macStrs
+				host.BondVendors = vendorStrs
+			} else {
+				conflicts = append(conflicts, models.ConflictEntry{
+					IP:      ipStr,
+					MACs:    macStrs,
+					Vendors: vendorStrs,
+					Subnet:  subnet,
+				})
+			}
+		}
+		hosts = append(hosts, host)
+	}
+	result.Mu.Unlock()
+
+	addedHosts := s.addHosts(hosts)
+	addedConflicts := s.addConflicts(conflicts)
+
+	if len(addedHosts) > 0 {
+		s.resolveHostnames()
+		if s.alertMgr != nil {
+			go s.alertMgr.SendHostAlerts(addedHosts)
+		}
+	}
+	if len(addedConflicts) > 0 && s.alertMgr != nil {
+		go s.alertMgr.SendConflictAlerts(addedConflicts)
+	}
+}
+
+// addHosts merges hosts into state, adding only IPs not already present.
+// Returns the subset that was newly added. The host list is kept sorted by IP.
+func (s *Scanner) addHosts(hosts []models.HostEntry) []models.HostEntry {
+	if len(hosts) == 0 {
+		return nil
+	}
+	s.state.Mu.Lock()
+	defer s.state.Mu.Unlock()
+
+	existing := make(map[string]bool, len(s.state.Hosts))
+	for _, h := range s.state.Hosts {
+		existing[h.IP] = true
+	}
+	var added []models.HostEntry
+	for _, h := range hosts {
+		if existing[h.IP] {
+			continue
+		}
+		existing[h.IP] = true
+		s.state.Hosts = append(s.state.Hosts, h)
+		added = append(added, h)
+	}
+	if len(added) > 0 {
+		sortHostsByIP(s.state.Hosts)
+	}
+	return added
+}
+
+// addConflicts merges conflict entries into state, adding only IPs not already
+// present. Returns the subset that was newly added.
+func (s *Scanner) addConflicts(conflicts []models.ConflictEntry) []models.ConflictEntry {
+	if len(conflicts) == 0 {
+		return nil
+	}
+	s.state.Mu.Lock()
+	defer s.state.Mu.Unlock()
+
+	existing := make(map[string]bool, len(s.state.Conflicts))
+	for _, c := range s.state.Conflicts {
+		existing[c.IP] = true
+	}
+	var added []models.ConflictEntry
+	for _, c := range conflicts {
+		if existing[c.IP] {
+			continue
+		}
+		existing[c.IP] = true
+		s.state.Conflicts = append(s.state.Conflicts, c)
+		added = append(added, c)
+	}
+	return added
+}
+
+// sortHostsByIP sorts a host slice by IP (IPv4 and IPv6 ordered together).
+func sortHostsByIP(hosts []models.HostEntry) {
+	sort.Slice(hosts, func(i, j int) bool {
+		a := net.ParseIP(hosts[i].IP)
+		b := net.ParseIP(hosts[j].IP)
+		if a == nil || b == nil {
+			return hosts[i].IP < hosts[j].IP
+		}
+		return bytes.Compare(a.To16(), b.To16()) < 0
+	})
 }
 
 // lookupVendor resolves a MAC address string to its vendor name
@@ -1126,13 +1390,28 @@ func (s *Scanner) reverifyIPv4() {
 			}
 		}
 	}
+	// Include ARP spoof alert IPs so stale alerts can be reverified/removed
+	for _, a := range s.state.ARPAlerts {
+		if ip := net.ParseIP(a.IP); ip != nil {
+			already := false
+			for _, x := range ips {
+				if x.Equal(ip) {
+					already = true
+					break
+				}
+			}
+			if !already {
+				ips = append(ips, ip)
+			}
+		}
+	}
 	s.state.Mu.RUnlock()
 
 	if len(ips) == 0 {
 		return
 	}
 
-	result, err := protocol.ProbeIPs(s.iface, s.localIP, s.localMAC, s.subnets, ips, 2*time.Second)
+	result, err := protocol.ProbeIPs(s.iface, s.localIP, s.localMAC, s.snapshotSubnets(), ips, 2*time.Second)
 	if err != nil {
 		log.Printf("reverify error: %v", err)
 		return
@@ -1235,22 +1514,35 @@ func (s *Scanner) reverifyIPv4() {
 		s.state.Hosts = keptHosts
 	}
 
-	// Apply conflict removals and send resolved alerts
+	// Apply conflict removals
 	if len(resolved) > 0 {
 		s.state.Conflicts = keptConflicts
-		var keptAlerts []models.ARPSpoofAlert
-		for _, a := range s.state.ARPAlerts {
-			if resolved[a.IP] {
-				delete(s.emailedARPKeys, a.IP+":"+a.NewMAC)
-				continue
-			}
-			keptAlerts = append(keptAlerts, a)
-		}
-		s.state.ARPAlerts = keptAlerts
+	}
 
-		if s.alertMgr != nil && len(resolvedEntries) > 0 {
-			go s.alertMgr.SendConflictResolvedAlerts(resolvedEntries)
+	// Clean up ARP spoof alerts. Drop an alert when any of:
+	//   - its IP's conflict has resolved,
+	//   - the host was removed for being unresponsive, or
+	//   - the flagged (suspicious) MAC no longer answers for that IP.
+	var keptAlerts []models.ARPSpoofAlert
+	for _, a := range s.state.ARPAlerts {
+		stale := resolved[a.IP] || removeHost[a.IP]
+		if !stale {
+			if set, probed := currentMACs[a.IP]; probed {
+				if !set[strings.ToLower(a.NewMAC)] {
+					stale = true
+				}
+			}
 		}
+		if stale {
+			delete(s.emailedARPKeys, a.IP+":"+a.NewMAC)
+			continue
+		}
+		keptAlerts = append(keptAlerts, a)
+	}
+	s.state.ARPAlerts = keptAlerts
+
+	if len(resolved) > 0 && s.alertMgr != nil && len(resolvedEntries) > 0 {
+		go s.alertMgr.SendConflictResolvedAlerts(resolvedEntries)
 	}
 }
 
@@ -1297,11 +1589,15 @@ func (s *Scanner) backgroundARPMonitor() {
 			s.reverifyHostsAndConflicts()
 		}
 
-		alerts, err := protocol.MonitorARP(s.iface.Name, baseline, gatewayIP, 5*time.Second, s.bgStopCh)
+		alerts, observed, err := protocol.MonitorARP(s.iface.Name, baseline, gatewayIP, 5*time.Second, s.bgStopCh)
 		if err != nil {
 			log.Printf("ARP monitor error: %v", err)
 			continue
 		}
+
+		// Passively learn newly-appeared hosts and subnets from observed traffic.
+		s.ingestObserved(observed, baseline)
+
 		if len(alerts) > 0 {
 			var newARPAlerts []models.ARPSpoofAlert
 			s.state.Mu.Lock()

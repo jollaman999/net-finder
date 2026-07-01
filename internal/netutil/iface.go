@@ -96,6 +96,24 @@ func ParseSubnets(subnetStr string, iface *net.Interface) []*net.IPNet {
 	return subnets
 }
 
+// InterfaceIPv4PrefixLen returns the prefix length of the interface's first
+// IPv4 address. Used as the assumed prefix for passively-discovered subnets
+// (ARP carries no netmask). Falls back to 24 when no IPv4 address is present.
+func InterfaceIPv4PrefixLen(iface *net.Interface) int {
+	if iface != nil {
+		if addrs, err := iface.Addrs(); err == nil {
+			for _, addr := range addrs {
+				if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil {
+					if ones, _ := ipnet.Mask.Size(); ones > 0 {
+						return ones
+					}
+				}
+			}
+		}
+	}
+	return 24
+}
+
 func ExpandCIDR(ipnet *net.IPNet) []net.IP {
 	ones, bits := ipnet.Mask.Size()
 	hostBits := bits - ones

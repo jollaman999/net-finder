@@ -21,21 +21,24 @@ type macEvent struct {
 	time time.Time
 }
 
-// MonitorARP monitors ARP traffic for spoofing indicators
-func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string, duration time.Duration, stopCh <-chan struct{}) ([]models.ARPSpoofAlert, error) {
+// MonitorARP watches ARP traffic for spoofing indicators. It also returns
+// `observed`, an IP->MAC map of every ARP sender seen during the window, so the
+// caller can passively learn newly-appeared hosts and subnets.
+func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string, duration time.Duration, stopCh <-chan struct{}) ([]models.ARPSpoofAlert, map[string]string, error) {
 	sock, err := netutil.NewRawSocket(ifaceName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open ARP monitor socket: %v", err)
+		return nil, nil, fmt.Errorf("failed to open ARP monitor socket: %v", err)
 	}
 	defer sock.Close()
 
 	if err := sock.SetBPFFilter(netutil.BPFFilterARP()); err != nil {
-		return nil, fmt.Errorf("failed to set ARP monitor BPF filter: %v", err)
+		return nil, nil, fmt.Errorf("failed to set ARP monitor BPF filter: %v", err)
 	}
 
 	// key -> alert index + packet count
 	alertIndex := make(map[string]int)
 	var alerts []models.ARPSpoofAlert
+	observed := make(map[string]string) // IP -> sender MAC (last seen)
 	var mu sync.Mutex
 
 	// MAC flapping detection: IP -> recent MAC change history
@@ -48,7 +51,7 @@ func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string
 	for time.Now().Before(deadline) {
 		select {
 		case <-stopCh:
-			return alerts, nil
+			return alerts, observed, nil
 		default:
 		}
 
@@ -90,6 +93,9 @@ func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string
 		ethMAC := eth.SrcMAC.String()
 		now := time.Now()
 		nowStr := now.Format("2006-01-02 15:04:05")
+
+		// Record the sender as an observed host (IP claims to be at this MAC).
+		observed[ipStr] = macStr
 
 		mu.Lock()
 
@@ -187,7 +193,7 @@ func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string
 		mu.Unlock()
 	}
 
-	return alerts, nil
+	return alerts, observed, nil
 }
 
 // MonitorNDP monitors NDP traffic for IPv6 spoofing indicators
