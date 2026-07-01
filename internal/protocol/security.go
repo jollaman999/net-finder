@@ -196,20 +196,23 @@ func MonitorARP(ifaceName string, baseline map[string][]string, gatewayIP string
 	return alerts, observed, nil
 }
 
-// MonitorNDP monitors NDP traffic for IPv6 spoofing indicators
-func MonitorNDP(ifaceName string, baseline map[string][]string, gatewayIPv6 string, duration time.Duration, stopCh <-chan struct{}) ([]models.NDPSpoofAlert, error) {
+// MonitorNDP monitors NDP traffic for IPv6 spoofing indicators. It also returns
+// `observed`, an IP->MAC map of every advertised address seen during the window,
+// so the caller can passively learn newly-appeared IPv6 hosts and subnets.
+func MonitorNDP(ifaceName string, baseline map[string][]string, gatewayIPv6 string, duration time.Duration, stopCh <-chan struct{}) ([]models.NDPSpoofAlert, map[string]string, error) {
 	sock, err := netutil.NewRawSocket(ifaceName)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open NDP monitor socket: %v", err)
+		return nil, nil, fmt.Errorf("failed to open NDP monitor socket: %v", err)
 	}
 	defer sock.Close()
 
 	if err := sock.SetBPFFilter(netutil.BPFFilterNDP()); err != nil {
-		return nil, fmt.Errorf("failed to set NDP monitor BPF filter: %v", err)
+		return nil, nil, fmt.Errorf("failed to set NDP monitor BPF filter: %v", err)
 	}
 
 	alertIndex := make(map[string]int)
 	var alerts []models.NDPSpoofAlert
+	observed := make(map[string]string) // IP -> advertised MAC (last seen)
 	var mu sync.Mutex
 
 	// MAC flapping detection
@@ -222,7 +225,7 @@ func MonitorNDP(ifaceName string, baseline map[string][]string, gatewayIPv6 stri
 	for time.Now().Before(deadline) {
 		select {
 		case <-stopCh:
-			return alerts, nil
+			return alerts, observed, nil
 		default:
 		}
 
@@ -257,6 +260,9 @@ func MonitorNDP(ifaceName string, baseline map[string][]string, gatewayIPv6 stri
 
 		ipStr := na.TargetAddress.String()
 		ethMAC := eth.SrcMAC.String()
+
+		// Record the advertised address as an observed host.
+		observed[ipStr] = ethMAC
 		now := time.Now()
 		nowStr := now.Format("2006-01-02 15:04:05")
 
@@ -367,7 +373,7 @@ func MonitorNDP(ifaceName string, baseline map[string][]string, gatewayIPv6 stri
 		mu.Unlock()
 	}
 
-	return alerts, nil
+	return alerts, observed, nil
 }
 
 // CheckDNSSpoofing queries multiple DNS servers and compares results

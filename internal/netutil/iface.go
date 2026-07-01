@@ -114,6 +114,25 @@ func InterfaceIPv4PrefixLen(iface *net.Interface) int {
 	return 24
 }
 
+// InterfaceIPv6PrefixLen returns the prefix length of the interface's first
+// global-unicast IPv6 address. Used as the assumed prefix for passively-
+// discovered IPv6 subnets. Falls back to 64 when none is present.
+func InterfaceIPv6PrefixLen(iface *net.Interface) int {
+	if iface != nil {
+		if addrs, err := iface.Addrs(); err == nil {
+			for _, addr := range addrs {
+				if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() == nil &&
+					ipnet.IP.IsGlobalUnicast() {
+					if ones, _ := ipnet.Mask.Size(); ones > 0 {
+						return ones
+					}
+				}
+			}
+		}
+	}
+	return 64
+}
+
 func ExpandCIDR(ipnet *net.IPNet) []net.IP {
 	ones, bits := ipnet.Mask.Size()
 	hostBits := bits - ones

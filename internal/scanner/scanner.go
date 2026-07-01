@@ -32,6 +32,7 @@ type Scanner struct {
 	localIPv6     net.IP
 	linkLocalIPv6 net.IP
 	subnetsV6     []*net.IPNet
+	subnetsV6Mu   sync.RWMutex // guards subnetsV6 (dynamically extended at runtime)
 	ipMode        models.IPMode
 	ndpResult     *protocol.NDPResult
 
@@ -152,7 +153,7 @@ func (s *Scanner) GetStatus() map[string]interface{} {
 	for _, sn := range s.snapshotSubnets() {
 		subnetStrs = append(subnetStrs, sn.String())
 	}
-	for _, sn := range s.subnetsV6 {
+	for _, sn := range s.snapshotSubnetsV6() {
 		subnetStrs = append(subnetStrs, sn.String())
 	}
 	netutil.SortCIDRStrings(subnetStrs)
@@ -424,7 +425,7 @@ func (s *Scanner) run() {
 				srcIPv6 = s.linkLocalIPv6
 			}
 			log.Printf("NDP scan starting (source: %s)", srcIPv6)
-			result, err := protocol.NDPScan(s.iface, srcIPv6, s.localMAC, s.subnetsV6, 3*time.Second)
+			result, err := protocol.NDPScan(s.iface, srcIPv6, s.localMAC, s.snapshotSubnetsV6(), 3*time.Second)
 			if err != nil {
 				log.Printf("NDP scan failed: %v", err)
 				return
@@ -922,6 +923,8 @@ func (s *Scanner) findSubnet(ip net.IP) string {
 		}
 	}
 	s.subnetsMu.RUnlock()
+	s.subnetsV6Mu.RLock()
+	defer s.subnetsV6Mu.RUnlock()
 	for _, subnet := range s.subnetsV6 {
 		if subnet.Contains(ip) {
 			return subnet.String()
@@ -937,6 +940,16 @@ func (s *Scanner) snapshotSubnets() []*net.IPNet {
 	defer s.subnetsMu.RUnlock()
 	out := make([]*net.IPNet, len(s.subnets))
 	copy(out, s.subnets)
+	return out
+}
+
+// snapshotSubnetsV6 returns a copy of the current IPv6 subnet list.
+// Callers must not hold s.state.Mu when calling (avoids lock-order inversion).
+func (s *Scanner) snapshotSubnetsV6() []*net.IPNet {
+	s.subnetsV6Mu.RLock()
+	defer s.subnetsV6Mu.RUnlock()
+	out := make([]*net.IPNet, len(s.subnetsV6))
+	copy(out, s.subnetsV6)
 	return out
 }
 
@@ -1120,6 +1133,191 @@ func (s *Scanner) mergeARPResult(result *protocol.ARPResult) {
 	}
 	if len(addedConflicts) > 0 && s.alertMgr != nil {
 		go s.alertMgr.SendConflictAlerts(addedConflicts)
+	}
+}
+
+// ingestObservedV6 processes passively-observed NDP traffic (IP->MAC) to add
+// newly-appeared IPv6 hosts and discover new prefixes not yet scanned, then
+// actively sweep (NDP multicast) to fill in quiet hosts. Mirrors ingestObserved.
+//
+// baseline (owned by the calling backgroundNDPMonitor goroutine) is updated in
+// place so subsequent monitor cycles track the newly-learned hosts for spoofing.
+func (s *Scanner) ingestObservedV6(observed map[string]string, baseline map[string][]string) {
+	if len(observed) == 0 {
+		return
+	}
+
+	localMACStr := ""
+	if s.localMAC != nil {
+		localMACStr = s.localMAC.String()
+	}
+
+	s.state.Mu.RLock()
+	known := make(map[string]bool)
+	for _, h := range s.state.Hosts {
+		if h.IPVersion == 6 {
+			known[h.IP] = true
+		}
+	}
+	s.state.Mu.RUnlock()
+
+	prefixLen := netutil.InterfaceIPv6PrefixLen(s.iface)
+
+	var newHosts []models.HostEntry
+	var newSubnets []*net.IPNet
+	seenNewSubnet := make(map[string]bool)
+
+	for ipStr, macStr := range observed {
+		ip := net.ParseIP(ipStr)
+		if ip == nil || ip.To4() != nil {
+			continue
+		}
+		// Skip our own addresses and traffic sourced from our own MAC.
+		if (s.localIPv6 != nil && ip.Equal(s.localIPv6)) ||
+			(s.linkLocalIPv6 != nil && ip.Equal(s.linkLocalIPv6)) {
+			continue
+		}
+		if macStr == localMACStr {
+			continue
+		}
+		// Only track global-unicast addresses (link-local/multicast are noise).
+		if !ip.IsGlobalUnicast() {
+			continue
+		}
+
+		// Learn a new prefix if this IP falls outside every known subnet.
+		if s.findSubnet(ip) == "" {
+			base := ip.Mask(net.CIDRMask(prefixLen, 128))
+			cidr := fmt.Sprintf("%s/%d", base.String(), prefixLen)
+			if !seenNewSubnet[cidr] {
+				if _, ipnet, err := net.ParseCIDR(cidr); err == nil {
+					seenNewSubnet[cidr] = true
+					newSubnets = append(newSubnets, ipnet)
+				}
+			}
+		}
+
+		if _, ok := baseline[ipStr]; !ok {
+			baseline[ipStr] = []string{macStr}
+		}
+
+		if known[ipStr] {
+			continue
+		}
+		known[ipStr] = true
+		vendor := "Unknown"
+		if mac, err := net.ParseMAC(macStr); err == nil && s.oui != nil {
+			vendor = s.oui.Lookup(mac)
+		}
+		newHosts = append(newHosts, models.HostEntry{
+			IP:        ipStr,
+			MAC:       macStr,
+			Vendor:    vendor,
+			IPVersion: 6,
+		})
+	}
+
+	if len(newSubnets) > 0 {
+		s.subnetsV6Mu.Lock()
+		s.subnetsV6 = append(s.subnetsV6, newSubnets...)
+		s.subnetsV6Mu.Unlock()
+		for _, sn := range newSubnets {
+			log.Printf("discovered new IPv6 subnet via passive NDP: %s", sn)
+		}
+		go s.sweepV6()
+	}
+
+	if len(newHosts) > 0 {
+		for i := range newHosts {
+			newHosts[i].Subnet = s.findSubnet(net.ParseIP(newHosts[i].IP))
+		}
+		added := s.addHosts(newHosts)
+		if len(added) > 0 {
+			s.resolveHostnames()
+			if s.alertMgr != nil {
+				go s.alertMgr.SendHostAlerts(added)
+			}
+		}
+	}
+}
+
+// sweepV6 runs an NDP multicast scan (which reaches every on-link node) and
+// merges newly-discovered IPv6 hosts into the host list.
+func (s *Scanner) sweepV6() {
+	srcIPv6 := s.localIPv6
+	if srcIPv6 == nil {
+		srcIPv6 = s.linkLocalIPv6
+	}
+	if srcIPv6 == nil {
+		return
+	}
+	result, err := protocol.NDPScan(s.iface, srcIPv6, s.localMAC, s.snapshotSubnetsV6(), 3*time.Second)
+	if err != nil {
+		log.Printf("new-subnet NDP sweep failed: %v", err)
+		return
+	}
+	s.mergeNDPResult(result)
+}
+
+// mergeNDPResult converts an NDPResult into hosts and merges them additively
+// (unlike processNDPResults, which rebuilds the whole IPv6 host list). Only
+// newly-added hosts trigger alerts. Link-local addresses are skipped when the
+// same MAC already has a global address.
+func (s *Scanner) mergeNDPResult(result *protocol.NDPResult) {
+	result.Mu.Lock()
+	globalMACs := make(map[string]bool)
+	for ipStr, macs := range result.Entries {
+		ip := net.ParseIP(ipStr)
+		if ip != nil && !ip.IsLinkLocalUnicast() {
+			for _, m := range macs {
+				globalMACs[m.String()] = true
+			}
+		}
+	}
+
+	var hosts []models.HostEntry
+	for ipStr, macs := range result.Entries {
+		ip := net.ParseIP(ipStr)
+		mac := macs[0]
+		macStr := mac.String()
+		if ip != nil && ip.IsLinkLocalUnicast() && globalMACs[macStr] {
+			continue
+		}
+		vendor := "Unknown"
+		if s.oui != nil {
+			vendor = s.oui.Lookup(mac)
+		}
+		host := models.HostEntry{
+			IP:        ipStr,
+			MAC:       macStr,
+			Vendor:    vendor,
+			Subnet:    s.findSubnet(ip),
+			IPVersion: 6,
+		}
+		if len(macs) > 1 {
+			if devGroups := netutil.GroupMACsByDevice(macs); len(devGroups) == 1 {
+				var macStrs, vendorStrs []string
+				for _, m := range macs {
+					macStrs = append(macStrs, m.String())
+					if s.oui != nil {
+						vendorStrs = append(vendorStrs, s.oui.Lookup(m))
+					}
+				}
+				host.IsBond = true
+				host.BondMACs = macStrs
+				host.BondVendors = vendorStrs
+			}
+		}
+		hosts = append(hosts, host)
+	}
+	result.Mu.Unlock()
+
+	added := s.addHosts(hosts)
+	if len(added) > 0 {
+		s.resolveHostnames()
+		if s.alertMgr != nil {
+			go s.alertMgr.SendHostAlerts(added)
+		}
 	}
 }
 
@@ -1314,15 +1512,21 @@ func (s *Scanner) reverifyHostsAndConflicts() {
 
 func (s *Scanner) reverifyIPv6() {
 	// Send NDP multicast and collect responses
-	ndpResult, err := protocol.NDPScan(s.iface, s.linkLocalIPv6, s.localMAC, s.subnetsV6, 2*time.Second)
+	ndpResult, err := protocol.NDPScan(s.iface, s.linkLocalIPv6, s.localMAC, s.snapshotSubnetsV6(), 2*time.Second)
 	if err != nil {
 		return
 	}
 
 	ndpResult.Mu.Lock()
 	aliveV6 := make(map[string]bool)
-	for ipStr := range ndpResult.Entries {
+	currentMACs := make(map[string]map[string]bool)
+	for ipStr, macs := range ndpResult.Entries {
 		aliveV6[ipStr] = true
+		set := make(map[string]bool)
+		for _, m := range macs {
+			set[strings.ToLower(m.String())] = true
+		}
+		currentMACs[ipStr] = set
 	}
 	ndpResult.Mu.Unlock()
 
@@ -1330,7 +1534,7 @@ func (s *Scanner) reverifyIPv6() {
 	defer s.state.Mu.Unlock()
 
 	s.hostMissMu.Lock()
-	var removeHost []string
+	rm := make(map[string]bool)
 	for _, h := range s.state.Hosts {
 		if h.IPVersion != 6 {
 			continue
@@ -1341,17 +1545,13 @@ func (s *Scanner) reverifyIPv6() {
 		}
 		s.hostMissCount[h.IP]++
 		if s.hostMissCount[h.IP] >= maxHostMisses {
-			removeHost = append(removeHost, h.IP)
+			rm[h.IP] = true
 			delete(s.hostMissCount, h.IP)
 		}
 	}
 	s.hostMissMu.Unlock()
 
-	if len(removeHost) > 0 {
-		rm := make(map[string]bool)
-		for _, ip := range removeHost {
-			rm[ip] = true
-		}
+	if len(rm) > 0 {
 		var kept []models.HostEntry
 		for _, h := range s.state.Hosts {
 			if rm[h.IP] {
@@ -1361,6 +1561,26 @@ func (s *Scanner) reverifyIPv6() {
 		}
 		s.state.Hosts = kept
 	}
+
+	// Clean up NDP spoof alerts. Drop an alert when the host was removed, or
+	// the flagged (suspicious) MAC no longer advertises that IP.
+	var keptAlerts []models.NDPSpoofAlert
+	for _, a := range s.state.NDPAlerts {
+		stale := rm[a.IP]
+		if !stale {
+			if set, probed := currentMACs[a.IP]; probed {
+				if !set[strings.ToLower(a.NewMAC)] {
+					stale = true
+				}
+			}
+		}
+		if stale {
+			delete(s.emailedNDPKeys, a.IP+":"+a.NewMAC)
+			continue
+		}
+		keptAlerts = append(keptAlerts, a)
+	}
+	s.state.NDPAlerts = keptAlerts
 }
 
 func (s *Scanner) reverifyIPv4() {
@@ -1810,11 +2030,15 @@ func (s *Scanner) backgroundNDPMonitor() {
 		default:
 		}
 
-		alerts, err := protocol.MonitorNDP(s.iface.Name, baseline, gatewayIPv6, 5*time.Second, s.bgStopCh)
+		alerts, observed, err := protocol.MonitorNDP(s.iface.Name, baseline, gatewayIPv6, 5*time.Second, s.bgStopCh)
 		if err != nil {
 			log.Printf("NDP monitor error: %v", err)
 			continue
 		}
+
+		// Passively learn newly-appeared IPv6 hosts and subnets.
+		s.ingestObservedV6(observed, baseline)
+
 		if len(alerts) > 0 {
 			var newNDPAlerts []models.NDPSpoofAlert
 			s.state.Mu.Lock()
