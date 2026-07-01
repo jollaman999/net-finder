@@ -570,7 +570,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
 <div class="container">
   <div class="progress-section">
     <div class="progress-text">
-      <span><span class="status-badge status-idle" id="statusBadge" data-i18n="status_idle">Idle</span> <span id="progressDesc"></span> <span id="noteScanStatus" style="display:none;font-size:12px;color:var(--text-secondary)"></span></span>
+      <span><span class="status-badge status-idle" id="statusBadge" data-i18n="status_idle">Idle</span> <span id="progressDesc"></span> <span id="bgScanStatus" style="display:none;font-size:12px;color:var(--text-secondary)"></span> <span id="noteScanStatus" style="display:none;font-size:12px;color:var(--text-secondary)"></span></span>
       <span id="progressPercent">0%</span>
     </div>
     <div class="progress-bar-container">
@@ -967,6 +967,7 @@ const i18n = {
     prog_scan_arp_done: 'ARP done ({0} hosts)',
     prog_scan_ndp_done: 'NDP done ({0} hosts)',
     prog_scan_done: 'Scan complete',
+    bg_scanning: 'Background scan in progress',
     prog_hostname_resolving: 'Resolving hostnames ({0} hosts)...',
     select_all: 'All',
     btn_alert_config: 'Alert Settings',
@@ -1097,6 +1098,7 @@ const i18n = {
     prog_scan_arp_done: 'ARP 완료 ({0}개 호스트)',
     prog_scan_ndp_done: 'NDP 완료 ({0}개 호스트)',
     prog_scan_done: '스캔 완료',
+    bg_scanning: '백그라운드 스캔 중',
     prog_hostname_resolving: '호스트명 해석 중 ({0}개 호스트)...',
     select_all: '전체',
     btn_alert_config: '알림 설정',
@@ -1227,6 +1229,7 @@ const i18n = {
     prog_scan_arp_done: 'ARP完了 ({0}台のホスト)',
     prog_scan_ndp_done: 'NDP完了 ({0}台のホスト)',
     prog_scan_done: 'スキャン完了',
+    bg_scanning: 'バックグラウンドスキャン中',
     prog_hostname_resolving: 'ホスト名を解決中 ({0}台のホスト)...',
     select_all: '全て',
     btn_alert_config: 'アラート設定',
@@ -1357,6 +1360,7 @@ const i18n = {
     prog_scan_arp_done: 'ARP完成 ({0}台主机)',
     prog_scan_ndp_done: 'NDP完成 ({0}台主机)',
     prog_scan_done: '扫描完成',
+    bg_scanning: '后台扫描中',
     prog_hostname_resolving: '正在解析主机名 ({0}台主机)...',
     select_all: '全部',
     btn_alert_config: '告警设置',
@@ -1647,6 +1651,13 @@ function updateStatus(data) {
     nsEl.textContent = `| HTTP/HTTPS scan: ${ns.done}/${ns.total}`;
   } else {
     nsEl.style.display = 'none';
+  }
+  const bgEl = document.getElementById('bgScanStatus');
+  if (data.bgScanning) {
+    bgEl.style.display = '';
+    bgEl.textContent = '⟳ ' + t('bg_scanning');
+  } else {
+    bgEl.style.display = 'none';
   }
   if (data.subnets && data.subnets.length > 0) scannerSubnets = data.subnets;
   if (data.ipMode && data.ipMode !== scannerIPMode) {

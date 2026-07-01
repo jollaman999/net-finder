@@ -55,9 +55,36 @@ type Scanner struct {
 	noteScanRunning bool
 	noteScanMu      sync.RWMutex
 
+	// Count of in-flight background scan tasks (passive-discovery sweeps and
+	// periodic host/conflict reverification) surfaced in the UI status.
+	bgScanActive int
+	bgScanMu     sync.Mutex
+
 	// Per-host miss count for liveness tracking (IPv4)
 	hostMissCount map[string]int
 	hostMissMu    sync.Mutex
+}
+
+// bgScanBegin/bgScanEnd bracket a background scan task; bgScanning reports
+// whether any such task is currently running.
+func (s *Scanner) bgScanBegin() {
+	s.bgScanMu.Lock()
+	s.bgScanActive++
+	s.bgScanMu.Unlock()
+}
+
+func (s *Scanner) bgScanEnd() {
+	s.bgScanMu.Lock()
+	if s.bgScanActive > 0 {
+		s.bgScanActive--
+	}
+	s.bgScanMu.Unlock()
+}
+
+func (s *Scanner) bgScanning() bool {
+	s.bgScanMu.Lock()
+	defer s.bgScanMu.Unlock()
+	return s.bgScanActive > 0
 }
 
 // NewScanner creates a new Scanner instance
@@ -158,6 +185,8 @@ func (s *Scanner) GetStatus() map[string]interface{} {
 	}
 	netutil.SortCIDRStrings(subnetStrs)
 
+	bgScanning := s.bgScanning()
+
 	s.state.Mu.RLock()
 	defer s.state.Mu.RUnlock()
 	s.noteScanMu.RLock()
@@ -169,11 +198,12 @@ func (s *Scanner) GetStatus() map[string]interface{} {
 	s.noteScanMu.RUnlock()
 
 	return map[string]interface{}{
-		"status":   s.state.Status,
-		"progress": s.state.Progress,
-		"subnets":  subnetStrs,
-		"ipMode":   s.ipMode,
-		"noteScan": noteProgress,
+		"status":     s.state.Status,
+		"progress":   s.state.Progress,
+		"subnets":    subnetStrs,
+		"ipMode":     s.ipMode,
+		"noteScan":   noteProgress,
+		"bgScanning": bgScanning,
 	}
 }
 
@@ -1066,6 +1096,8 @@ func (s *Scanner) sweepSubnets(subnets []*net.IPNet) {
 	if s.localIP == nil || len(subnets) == 0 {
 		return
 	}
+	s.bgScanBegin()
+	defer s.bgScanEnd()
 	result, err := protocol.ARPScan(s.iface, s.localIP, s.localMAC, subnets, 3*time.Second)
 	if err != nil {
 		log.Printf("new-subnet sweep failed: %v", err)
@@ -1251,6 +1283,8 @@ func (s *Scanner) sweepV6() {
 	if srcIPv6 == nil {
 		return
 	}
+	s.bgScanBegin()
+	defer s.bgScanEnd()
 	result, err := protocol.NDPScan(s.iface, srcIPv6, s.localMAC, s.snapshotSubnetsV6(), 3*time.Second)
 	if err != nil {
 		log.Printf("new-subnet NDP sweep failed: %v", err)
@@ -1502,6 +1536,8 @@ func (s *Scanner) backgroundProtocolListeners() {
 const maxHostMisses = 5
 
 func (s *Scanner) reverifyHostsAndConflicts() {
+	s.bgScanBegin()
+	defer s.bgScanEnd()
 	if s.localIP != nil {
 		s.reverifyIPv4()
 	}
