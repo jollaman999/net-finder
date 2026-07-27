@@ -27,6 +27,9 @@ func main() {
 	port := flag.Int("p", 9090, "web server port")
 	autoScan := flag.Bool("auto", true, "auto scan on start")
 	ipModeStr := flag.String("mode", "both", "IP version: ipv4, ipv6, both")
+	arpRate := flag.Int("arp-rate", 10, "max ARP packets/sec (keep low to avoid Dynamic ARP Inspection)")
+	probeRate := flag.Int("probe-rate", 500, "max routed L3 liveness probes per sec")
+	portScanRate := flag.Int("portscan-rate", 50, "max full port-scan connections per sec (kept low; 1-65535 sweep)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Net Finder\n\n")
@@ -48,6 +51,12 @@ func main() {
 	}
 
 	mode := models.ParseIPMode(*ipModeStr)
+
+	// Global send-rate caps so the scanner can never burst hard enough to trip
+	// switch storm-control or Dynamic ARP Inspection.
+	netutil.SetARPRate(*arpRate)
+	netutil.SetProbeRate(*probeRate)
+	netutil.SetPortScanRate(*portScanRate)
 
 	// Get network interface
 	iface, err := netutil.GetInterfaceForMode(*ifaceName, mode)

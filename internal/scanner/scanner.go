@@ -434,13 +434,16 @@ func (s *Scanner) run() {
 		scanWg.Add(1)
 		go func() {
 			defer scanWg.Done()
-			result, err := protocol.ARPScan(s.iface, s.localIP, s.localMAC, s.snapshotSubnets(), 3*time.Second)
+			subs := s.snapshotSubnets()
+			result, err := protocol.ARPScan(s.iface, s.localIP, s.localMAC, subs, 3*time.Second)
 			if err != nil {
 				log.Printf("ARP scan failed: %v", err)
-				return
+			} else {
+				s.arpResult = result
+				s.processARPResults(result)
 			}
-			s.arpResult = result
-			s.processARPResults(result)
+			// Remote (routed) subnets: discover via L3 probes, never ARP spoofing.
+			s.probeRemoteSubnets(subs)
 			s.setProgress("scan_arp_done", 30, len(s.GetHosts()))
 		}()
 	}
@@ -1090,20 +1093,84 @@ func (s *Scanner) ingestObserved(observed map[string]string, baseline map[string
 	}
 }
 
-// sweepSubnets actively ARP-scans the given subnets and merges the results into
-// the host list without disturbing hosts from other subnets.
+// sweepSubnets discovers hosts in newly-learned subnets and merges them into the
+// host list additively. Attached subnets use ARP; remote (routed) subnets use
+// L3 probes — never spoofed cross-subnet ARP.
 func (s *Scanner) sweepSubnets(subnets []*net.IPNet) {
 	if s.localIP == nil || len(subnets) == 0 {
 		return
 	}
 	s.bgScanBegin()
 	defer s.bgScanEnd()
-	result, err := protocol.ARPScan(s.iface, s.localIP, s.localMAC, subnets, 3*time.Second)
-	if err != nil {
-		log.Printf("new-subnet sweep failed: %v", err)
+
+	var attached, remote []*net.IPNet
+	for _, sn := range subnets {
+		if sn.Contains(s.localIP) {
+			attached = append(attached, sn)
+		} else {
+			remote = append(remote, sn)
+		}
+	}
+	if len(attached) > 0 {
+		if result, err := protocol.ARPScan(s.iface, s.localIP, s.localMAC, attached, 3*time.Second); err == nil {
+			s.mergeARPResult(result)
+		} else {
+			log.Printf("new-subnet ARP sweep failed: %v", err)
+		}
+	}
+	if len(remote) > 0 {
+		s.mergeL3Alive(protocol.L3ProbeScan(remote, s.localIP, 3*time.Second))
+	}
+}
+
+// probeRemoteSubnets discovers hosts in the routed (non-attached) subnets of the
+// given list via L3 probes and merges them.
+func (s *Scanner) probeRemoteSubnets(subnets []*net.IPNet) {
+	if s.localIP == nil {
 		return
 	}
-	s.mergeARPResult(result)
+	var remote []*net.IPNet
+	for _, sn := range subnets {
+		if !sn.Contains(s.localIP) {
+			remote = append(remote, sn)
+		}
+	}
+	if len(remote) == 0 {
+		return
+	}
+	s.bgScanBegin()
+	alive := protocol.L3ProbeScan(remote, s.localIP, 3*time.Second)
+	s.bgScanEnd()
+	s.mergeL3Alive(alive)
+}
+
+// mergeL3Alive turns a set of L3-discovered live IPs into host entries (MAC is
+// unknowable across a router) and merges them additively.
+func (s *Scanner) mergeL3Alive(alive map[string]bool) {
+	if len(alive) == 0 {
+		return
+	}
+	var hosts []models.HostEntry
+	for ipStr := range alive {
+		ip := net.ParseIP(ipStr)
+		if ip == nil || ip.To4() == nil {
+			continue
+		}
+		hosts = append(hosts, models.HostEntry{
+			IP:        ipStr,
+			MAC:       "",
+			Vendor:    "",
+			Subnet:    s.findSubnet(ip),
+			IPVersion: 4,
+		})
+	}
+	added := s.addHosts(hosts)
+	if len(added) > 0 {
+		s.resolveHostnames()
+		if s.alertMgr != nil {
+			go s.alertMgr.SendHostAlerts(added)
+		}
+	}
 }
 
 // mergeARPResult converts an ARPResult into hosts/conflicts and merges them into
@@ -1684,6 +1751,31 @@ func (s *Scanner) reverifyIPv4() {
 	}
 	result.Mu.Unlock()
 
+	// Remote (routed) hosts have no MAC and can't be ARP-probed; re-check their
+	// liveness with L3 probes so they aren't wrongly aged out.
+	subs := s.snapshotSubnets()
+	isAttached := func(ip net.IP) bool {
+		for _, sn := range subs {
+			if sn.Contains(ip) && s.localIP != nil && sn.Contains(s.localIP) {
+				return true
+			}
+		}
+		return false
+	}
+	var remoteIPs []net.IP
+	for _, ip := range ips {
+		if !isAttached(ip) {
+			remoteIPs = append(remoteIPs, ip)
+		}
+	}
+	aliveL3 := protocol.L3ProbeIPs(remoteIPs, 2*time.Second)
+	isLive := func(ip string) bool {
+		if _, ok := currentMACs[ip]; ok {
+			return true
+		}
+		return aliveL3[ip]
+	}
+
 	s.state.Mu.Lock()
 	defer s.state.Mu.Unlock()
 
@@ -1694,7 +1786,7 @@ func (s *Scanner) reverifyIPv4() {
 		if h.IPVersion != 4 {
 			continue
 		}
-		if _, alive := currentMACs[h.IP]; alive {
+		if isLive(h.IP) {
 			delete(s.hostMissCount, h.IP)
 			continue
 		}

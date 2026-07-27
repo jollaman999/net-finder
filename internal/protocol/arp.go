@@ -1,7 +1,6 @@
 package protocol
 
 import (
-	"encoding/binary"
 	"fmt"
 	"log"
 	"net"
@@ -41,28 +40,6 @@ func (r *ARPResult) Add(ip net.IP, mac net.HardwareAddr) {
 	macCopy := make(net.HardwareAddr, len(mac))
 	copy(macCopy, mac)
 	r.Entries[ipStr] = append(r.Entries[ipStr], macCopy)
-}
-
-// subnetSourceIP returns the best source IP for ARP scanning a given subnet.
-// For local subnets (containing localIP), returns localIP.
-// For remote subnets, synthesizes a source IP within the subnet to bypass
-// hosts with strict arp_ignore (>=2) that reject cross-subnet ARP requests.
-func subnetSourceIP(subnet *net.IPNet, localIP net.IP) net.IP {
-	if subnet.Contains(localIP) {
-		return localIP
-	}
-	ones, bits := subnet.Mask.Size()
-	hostBits := bits - ones
-	if hostBits <= 1 {
-		return localIP // /31 or /32, can't synthesize
-	}
-	numHosts := 1 << uint(hostBits)
-	base := binary.BigEndian.Uint32(subnet.IP.To4())
-	// Use second-to-last usable IP (e.g., .253 for /24) to avoid
-	// common gateway addresses (.1, .254)
-	ip := make(net.IP, 4)
-	binary.BigEndian.PutUint32(ip, base+uint32(numHosts-3))
-	return ip
 }
 
 func DiscoverSubnets(iface *net.Interface, duration time.Duration) ([]*net.IPNet, error) {
@@ -144,25 +121,27 @@ func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, su
 
 	time.Sleep(100 * time.Millisecond)
 
-	// Build target list with per-subnet source IPs
-	// Remote subnets use a synthesized in-subnet source to bypass arp_ignore filters
+	// ARP is L2-local: only scan subnets we are directly attached to, and always
+	// use our real source IP. Never synthesize a foreign in-subnet source — that
+	// is indistinguishable from ARP spoofing and trips Dynamic ARP Inspection.
+	// Remote subnets are handled separately via routed L3 probes.
 	var targets []net.IP
-	srcIPMap := make(map[string]net.IP) // target IP string -> source IP to use
 	for _, subnet := range subnets {
-		srcIP := subnetSourceIP(subnet, localIP)
-		for _, ip := range netutil.ExpandCIDR(subnet) {
-			targets = append(targets, ip)
-			srcIPMap[ip.String()] = srcIP
+		if localIP == nil || !subnet.Contains(localIP) {
+			continue
 		}
-		if !subnet.Contains(localIP) {
-			log.Printf("remote subnet %s → using source IP %s", subnet, srcIP)
-		}
+		targets = append(targets, netutil.ExpandCIDR(subnet)...)
+	}
+	if len(targets) == 0 {
+		close(done)
+		wg.Wait()
+		return result, nil
 	}
 
-	// Round 1: full sweep
+	// Round 1: full sweep (globally rate-limited to stay under DAI thresholds)
 	for _, ip := range targets {
-		sendARPRequest(sock, iface, srcIPMap[ip.String()], localMAC, ip)
-		time.Sleep(500 * time.Microsecond)
+		netutil.ARPAcquire()
+		sendARPRequest(sock, iface, localIP, localMAC, ip)
 	}
 
 	time.Sleep(timeout)
@@ -182,10 +161,9 @@ func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, su
 			break
 		}
 
-		log.Printf("ARP retry %d: %d unresponsive IPs", retry+1, len(missing))
 		for _, ip := range missing {
-			sendARPRequest(sock, iface, srcIPMap[ip.String()], localMAC, ip)
-			time.Sleep(1 * time.Millisecond)
+			netutil.ARPAcquire()
+			sendARPRequest(sock, iface, localIP, localMAC, ip)
 		}
 
 		time.Sleep(2 * time.Second)
@@ -261,20 +239,32 @@ func ProbeIPs(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, s
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Resolve source IP per target based on subnet
-	srcFor := func(ip net.IP) net.IP {
+	// Only ARP-probe IPs in a subnet we are attached to, always with our real
+	// source IP. Remote IPs cannot be reached by ARP and must never be spoofed.
+	attached := func(ip net.IP) bool {
 		for _, sn := range subnets {
-			if sn.Contains(ip) {
-				return subnetSourceIP(sn, localIP)
+			if sn.Contains(ip) && localIP != nil && sn.Contains(localIP) {
+				return true
 			}
 		}
-		return localIP
+		return false
+	}
+	var localIPs []net.IP
+	for _, ip := range ips {
+		if attached(ip) {
+			localIPs = append(localIPs, ip)
+		}
+	}
+	if len(localIPs) == 0 {
+		close(done)
+		wg.Wait()
+		return result, nil
 	}
 
-	// Round 1: full sweep
-	for _, ip := range ips {
-		sendARPRequest(sock, iface, srcFor(ip), localMAC, ip)
-		time.Sleep(500 * time.Microsecond)
+	// Round 1: full sweep (rate-limited)
+	for _, ip := range localIPs {
+		netutil.ARPAcquire()
+		sendARPRequest(sock, iface, localIP, localMAC, ip)
 	}
 	time.Sleep(timeout)
 
@@ -282,7 +272,7 @@ func ProbeIPs(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, s
 	for retry := 0; retry < 2; retry++ {
 		var missing []net.IP
 		result.Mu.Lock()
-		for _, ip := range ips {
+		for _, ip := range localIPs {
 			if _, ok := result.Entries[ip.String()]; !ok {
 				missing = append(missing, ip)
 			}
@@ -294,8 +284,8 @@ func ProbeIPs(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, s
 		}
 
 		for _, ip := range missing {
-			sendARPRequest(sock, iface, srcFor(ip), localMAC, ip)
-			time.Sleep(1 * time.Millisecond)
+			netutil.ARPAcquire()
+			sendARPRequest(sock, iface, localIP, localMAC, ip)
 		}
 		time.Sleep(timeout)
 	}
@@ -411,16 +401,6 @@ func icmpFallbackScan(iface *net.Interface, localIP net.IP, localMAC net.Hardwar
 		missingSet[ip.String()] = true
 	}
 
-	// Build subnet lookup for source IP selection
-	findSubnet := func(ip net.IP) *net.IPNet {
-		for _, sn := range subnets {
-			if sn.Contains(ip) {
-				return sn
-			}
-		}
-		return nil
-	}
-
 	done := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -488,14 +468,10 @@ func icmpFallbackScan(iface *net.Interface, localIP net.IP, localMAC net.Hardwar
 
 	broadcastMAC := net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 
-	// Round 1: send ICMP echo via broadcast MAC
+	// Round 1: send ICMP echo via broadcast MAC (rate-limited, real source IP)
 	for _, ip := range missing {
-		srcIP := localIP
-		if sn := findSubnet(ip); sn != nil {
-			srcIP = subnetSourceIP(sn, localIP)
-		}
-		sendICMPEcho(sock, srcIP, localMAC, broadcastMAC, ip)
-		time.Sleep(500 * time.Microsecond)
+		netutil.ARPAcquire()
+		sendICMPEcho(sock, localIP, localMAC, broadcastMAC, ip)
 	}
 
 	time.Sleep(3 * time.Second)
@@ -509,14 +485,9 @@ func icmpFallbackScan(iface *net.Interface, localIP net.IP, localMAC net.Hardwar
 	}
 
 	if len(stillMissing) > 0 {
-		log.Printf("ICMP retry: %d unresponsive IPs", len(stillMissing))
 		for _, ip := range stillMissing {
-			srcIP := localIP
-			if sn := findSubnet(ip); sn != nil {
-				srcIP = subnetSourceIP(sn, localIP)
-			}
-			sendICMPEcho(sock, srcIP, localMAC, broadcastMAC, ip)
-			time.Sleep(1 * time.Millisecond)
+			netutil.ARPAcquire()
+			sendICMPEcho(sock, localIP, localMAC, broadcastMAC, ip)
 		}
 		time.Sleep(2 * time.Second)
 	}
