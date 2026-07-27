@@ -28,7 +28,7 @@ func main() {
 	autoScan := flag.Bool("auto", true, "auto scan on start")
 	ipModeStr := flag.String("mode", "both", "IP version: ipv4, ipv6, both")
 	arpRate := flag.Int("arp-rate", 10, "max ARP packets/sec (keep low to avoid Dynamic ARP Inspection)")
-	probeRate := flag.Int("probe-rate", 500, "max routed L3 liveness probes per sec")
+	probeRate := flag.Int("probe-rate", 100, "max routed L3 liveness probes per sec")
 	portScanRate := flag.Int("portscan-rate", 50, "max full port-scan connections per sec (kept low; 1-65535 sweep)")
 
 	flag.Usage = func() {
