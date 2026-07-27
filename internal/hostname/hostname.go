@@ -15,16 +15,19 @@ import (
 	"time"
 
 	"net-finder/internal/models"
+	"net-finder/internal/netutil"
 )
 
 // ResolveHostnames resolves hostnames for a list of IPs using multiple methods:
 // 1. DNS PTR (reverse DNS)
 // 2. NetBIOS Name Service (UDP 137) - Windows/Samba hosts
 // 3. mDNS (UDP 5353) - Linux (Avahi) / macOS hosts
-// 4. SNMP sysName (UDP 161) - network devices / servers with SNMP
-// 5. TLS Certificate CN/SAN (TCP 443) - HTTPS servers, ESXi, etc.
-// 6. HTTP title (TCP 443/80) - web management pages
-// 7. SMTP Banner (TCP 25) - mail servers
+// 4. TLS Certificate CN/SAN (TCP 443) - HTTPS servers, ESXi, etc.
+// 5. SMTP Banner (TCP 25) - mail servers
+//
+// Network infrastructure (switches/routers/APs) is named from LLDP SysName /
+// CDP DeviceID collected passively by the scanner — see scanner.resolveHostnames
+// — which replaces the old, noisy SNMP "public" probing.
 func ResolveHostnames(ips []string) []models.HostnameEntry {
 	if len(ips) == 0 {
 		return nil
@@ -55,9 +58,6 @@ func ResolveHostnames(ips []string) []models.HostnameEntry {
 				}
 				if hostname == "" {
 					hostname = resolveMDNS(ip)
-				}
-				if hostname == "" {
-					hostname = resolveSNMP(ip)
 				}
 				if hostname == "" {
 					hostname = resolveTLS(ip)
@@ -245,31 +245,6 @@ func resolveMDNS(ip string) string {
 	return ""
 }
 
-// resolveSNMP queries SNMP sysName (OID 1.3.6.1.2.1.1.5.0) with community "public"
-func resolveSNMP(ip string) string {
-	conn, err := net.DialTimeout("udp", net.JoinHostPort(ip, "161"), 500*time.Millisecond)
-	if err != nil {
-		return ""
-	}
-	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(1 * time.Second))
-
-	// SNMPv2c GET request for sysName.0 (1.3.6.1.2.1.1.5.0)
-	pkt := buildSNMPGetRequest("public", []int{1, 3, 6, 1, 2, 1, 1, 5, 0})
-
-	if _, err = conn.Write(pkt); err != nil {
-		return ""
-	}
-
-	buf := make([]byte, 1500)
-	n, err := conn.Read(buf)
-	if err != nil || n < 20 {
-		return ""
-	}
-
-	return parseSNMPResponse(buf[:n])
-}
-
 // ── DNS helpers ──
 
 func buildDNSQuery(txID uint16, name string, qtype uint16, unicast bool) []byte {
@@ -382,196 +357,6 @@ func readDNSName(data []byte, pos int) string {
 	return strings.Join(parts, ".")
 }
 
-// ── SNMP helpers ──
-
-func buildSNMPGetRequest(community string, oid []int) []byte {
-	// Encode OID
-	oidBytes := encodeOID(oid)
-	// VarBind: SEQUENCE { OID, NULL }
-	varbind := asn1Sequence(append(asn1OID(oidBytes), asn1Null()...))
-	// VarBindList: SEQUENCE { varbind }
-	varbindList := asn1Sequence(varbind)
-	// PDU: GetRequest (0xA0) { requestID, errorStatus, errorIndex, varbindList }
-	reqID := asn1Integer(1)
-	errStatus := asn1Integer(0)
-	errIndex := asn1Integer(0)
-	pduContent := append(reqID, errStatus...)
-	pduContent = append(pduContent, errIndex...)
-	pduContent = append(pduContent, varbindList...)
-	pdu := asn1Constructed(0xA0, pduContent)
-	// Message: SEQUENCE { version, community, pdu }
-	version := asn1Integer(1) // SNMPv2c
-	comm := asn1OctetString([]byte(community))
-	msgContent := append(version, comm...)
-	msgContent = append(msgContent, pdu...)
-	return asn1Sequence(msgContent)
-}
-
-func parseSNMPResponse(data []byte) string {
-	// Quick parse: find the OctetString value for sysName in the response
-	// Walk through ASN.1 structure looking for the value
-	pos := 0
-	if pos >= len(data) || data[pos] != 0x30 {
-		return "" // not a SEQUENCE
-	}
-	// Skip outer SEQUENCE
-	_, pos = asn1ReadLength(data, pos+1)
-	if pos < 0 {
-		return ""
-	}
-	// Skip version (INTEGER)
-	pos = asn1Skip(data, pos)
-	// Skip community (OCTET STRING)
-	pos = asn1Skip(data, pos)
-	if pos < 0 || pos >= len(data) {
-		return ""
-	}
-	// PDU (0xA2 = GetResponse)
-	if data[pos] != 0xA2 {
-		return ""
-	}
-	_, pos = asn1ReadLength(data, pos+1)
-	// Skip requestID, errorStatus, errorIndex
-	pos = asn1Skip(data, pos) // requestID
-	pos = asn1Skip(data, pos) // errorStatus
-	pos = asn1Skip(data, pos) // errorIndex
-	if pos < 0 || pos >= len(data) {
-		return ""
-	}
-	// VarBindList (SEQUENCE)
-	if data[pos] != 0x30 {
-		return ""
-	}
-	_, pos = asn1ReadLength(data, pos+1)
-	// First VarBind (SEQUENCE)
-	if pos >= len(data) || data[pos] != 0x30 {
-		return ""
-	}
-	_, pos = asn1ReadLength(data, pos+1)
-	// Skip OID
-	pos = asn1Skip(data, pos)
-	if pos < 0 || pos >= len(data) {
-		return ""
-	}
-	// Value - should be OCTET STRING (0x04)
-	if data[pos] == 0x04 {
-		vlen, vpos := asn1ReadLength(data, pos+1)
-		if vpos >= 0 && vpos+vlen <= len(data) {
-			name := strings.TrimSpace(string(data[vpos : vpos+vlen]))
-			if name != "" {
-				return name
-			}
-		}
-	}
-	return ""
-}
-
-func encodeOID(oid []int) []byte {
-	if len(oid) < 2 {
-		return nil
-	}
-	result := []byte{byte(oid[0]*40 + oid[1])}
-	for i := 2; i < len(oid); i++ {
-		result = append(result, encodeOIDComponent(oid[i])...)
-	}
-	return result
-}
-
-func encodeOIDComponent(v int) []byte {
-	if v < 128 {
-		return []byte{byte(v)}
-	}
-	var parts []byte
-	for v > 0 {
-		parts = append([]byte{byte(v & 0x7F)}, parts...)
-		v >>= 7
-	}
-	for i := 0; i < len(parts)-1; i++ {
-		parts[i] |= 0x80
-	}
-	return parts
-}
-
-func asn1Sequence(content []byte) []byte {
-	hdr := append([]byte{0x30}, asn1Length(len(content))...)
-	return append(hdr, content...)
-}
-
-func asn1Constructed(tag byte, content []byte) []byte {
-	return append(append([]byte{tag}, asn1Length(len(content))...), content...)
-}
-
-func asn1Integer(v int) []byte {
-	var val []byte
-	if v == 0 {
-		val = []byte{0}
-	} else {
-		tmp := v
-		for tmp > 0 {
-			val = append([]byte{byte(tmp & 0xFF)}, val...)
-			tmp >>= 8
-		}
-		if val[0]&0x80 != 0 {
-			val = append([]byte{0}, val...)
-		}
-	}
-	return append(append([]byte{0x02}, asn1Length(len(val))...), val...)
-}
-
-func asn1OctetString(v []byte) []byte {
-	return append(append([]byte{0x04}, asn1Length(len(v))...), v...)
-}
-
-func asn1OID(encoded []byte) []byte {
-	return append(append([]byte{0x06}, asn1Length(len(encoded))...), encoded...)
-}
-
-func asn1Null() []byte {
-	return []byte{0x05, 0x00}
-}
-
-func asn1Length(l int) []byte {
-	if l < 128 {
-		return []byte{byte(l)}
-	}
-	var parts []byte
-	tmp := l
-	for tmp > 0 {
-		parts = append([]byte{byte(tmp & 0xFF)}, parts...)
-		tmp >>= 8
-	}
-	return append([]byte{byte(0x80 | len(parts))}, parts...)
-}
-
-func asn1ReadLength(data []byte, pos int) (int, int) {
-	if pos >= len(data) {
-		return 0, -1
-	}
-	if data[pos] < 128 {
-		return int(data[pos]), pos + 1
-	}
-	numBytes := int(data[pos] & 0x7F)
-	pos++
-	length := 0
-	for i := 0; i < numBytes && pos < len(data); i++ {
-		length = (length << 8) | int(data[pos])
-		pos++
-	}
-	return length, pos
-}
-
-func asn1Skip(data []byte, pos int) int {
-	if pos < 0 || pos >= len(data) {
-		return -1
-	}
-	pos++ // skip tag
-	vlen, vpos := asn1ReadLength(data, pos)
-	if vpos < 0 {
-		return -1
-	}
-	return vpos + vlen
-}
-
 // resolveTLS connects to port 443 and extracts hostname from TLS certificate CN/SAN
 func resolveTLS(ip string) string {
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, "443"), 500*time.Millisecond)
@@ -673,6 +458,7 @@ func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
 		scanWg.Add(1)
 		go func(p int) {
 			defer func() { <-sem; scanWg.Done() }()
+			netutil.PortScanAcquire() // dedicated (lower) rate limit for the port-scan sweep
 			conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, strconv.Itoa(p)), 200*time.Millisecond)
 			if err != nil {
 				return
@@ -788,6 +574,11 @@ var dbActiveProbePorts = map[int]string{
 	27017: "mongodb",
 	27018: "mongodb",
 	27019: "mongodb",
+	1433:  "mssql",
+	1434:  "mssql",
+	1521:  "oracle",
+	1522:  "oracle",
+	1526:  "oracle",
 }
 
 // tryDB probes a single open port for a well-known database service. It first
@@ -809,6 +600,10 @@ func tryDB(ip, port string) *dbProbeResult {
 		name = probeMemcached(ip, port)
 	case "mongodb":
 		name = probeMongoDB(ip, port)
+	case "mssql":
+		name = probeMSSQL(ip, port)
+	case "oracle":
+		name = probeOracle(ip, port)
 	}
 	if name != "" {
 		return &dbProbeResult{port: port, name: name}
@@ -983,6 +778,136 @@ func probeMongoDB(ip, port string) string {
 		return "MongoDB"
 	}
 	return ""
+}
+
+// probeMSSQL sends a TDS Pre-Login packet; SQL Server replies with a TDS
+// response (type 0x04) whose VERSION option carries the server version.
+func probeMSSQL(ip, port string) string {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+
+	// Pre-Login payload: single VERSION option (token 0x00) + terminator.
+	payload := []byte{
+		0x00, 0x00, 0x06, 0x00, 0x06, // VERSION: offset=6, length=6
+		0xff,             // options terminator
+		0, 0, 0, 0, 0, 0, // VERSION data (6 bytes)
+	}
+	pkt := make([]byte, 8+len(payload))
+	pkt[0] = 0x12 // type: PRELOGIN
+	pkt[1] = 0x01 // status: EOM
+	binary.BigEndian.PutUint16(pkt[2:4], uint16(len(pkt)))
+	copy(pkt[8:], payload)
+
+	conn.SetDeadline(time.Now().Add(1 * time.Second))
+	if _, err := conn.Write(pkt); err != nil {
+		return ""
+	}
+	buf := make([]byte, 512)
+	n, err := conn.Read(buf)
+	if err != nil || n < 8 || buf[0] != 0x04 {
+		return ""
+	}
+	// Parse the response payload for the VERSION option (token 0x00).
+	if ver := parseTDSVersion(buf[8:n]); ver != "" {
+		return "MSSQL " + ver
+	}
+	return "MSSQL"
+}
+
+// parseTDSVersion walks a Pre-Login response payload and returns "maj.min.build"
+// from the VERSION option, or "" if it cannot be parsed.
+func parseTDSVersion(p []byte) string {
+	for pos := 0; pos+5 <= len(p); pos += 5 {
+		token := p[pos]
+		if token == 0xff {
+			break
+		}
+		off := int(binary.BigEndian.Uint16(p[pos+1 : pos+3]))
+		ln := int(binary.BigEndian.Uint16(p[pos+3 : pos+5]))
+		if token == 0x00 && ln >= 4 && off+4 <= len(p) {
+			major := p[off]
+			minor := p[off+1]
+			build := binary.BigEndian.Uint16(p[off+2 : off+4])
+			return fmt.Sprintf("%d.%d.%d", major, minor, build)
+		}
+	}
+	return ""
+}
+
+// probeOracle sends a TNS CONNECT packet; an Oracle listener replies with a TNS
+// packet (Accept/Refuse/Redirect/Resend). The Refuse/data payload often carries
+// the version (VSNNUM), which is decoded when present.
+func probeOracle(ip, port string) string {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+
+	connectData := []byte("(CONNECT_DATA=(COMMAND=version))")
+	const dataOffset = 58
+	pkt := make([]byte, dataOffset+len(connectData))
+	pkt[4] = 0x01                                  // packet type: CONNECT
+	binary.BigEndian.PutUint16(pkt[8:10], 0x0139)  // version
+	binary.BigEndian.PutUint16(pkt[10:12], 0x012c) // version (compatible)
+	binary.BigEndian.PutUint16(pkt[14:16], 0x0800) // session data unit
+	binary.BigEndian.PutUint16(pkt[16:18], 0x7fff) // max transmission data unit
+	binary.BigEndian.PutUint16(pkt[18:20], 0x4f98) // NT protocol characteristics
+	binary.BigEndian.PutUint16(pkt[22:24], 0x0001) // value of 1 in hardware
+	binary.BigEndian.PutUint16(pkt[24:26], uint16(len(connectData)))
+	binary.BigEndian.PutUint16(pkt[26:28], dataOffset)
+	pkt[32] = 0x01 // connect flags 0
+	pkt[33] = 0x01 // connect flags 1
+	copy(pkt[dataOffset:], connectData)
+	binary.BigEndian.PutUint16(pkt[0:2], uint16(len(pkt))) // total length
+
+	conn.SetDeadline(time.Now().Add(1 * time.Second))
+	if _, err := conn.Write(pkt); err != nil {
+		return ""
+	}
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
+	if err != nil || n < 8 {
+		return ""
+	}
+	// Response packet type at byte 4: 2=Accept, 4=Refuse, 5=Redirect, 11=Resend.
+	switch buf[4] {
+	case 0x02, 0x04, 0x05, 0x0b:
+	default:
+		return ""
+	}
+	if ver := parseOracleVersion(buf[8:n]); ver != "" {
+		return "Oracle " + ver
+	}
+	return "Oracle"
+}
+
+// parseOracleVersion extracts a dotted version from a TNS response containing a
+// "VSNNUM=<decimal>" token (a packed 32-bit version number), or "" if absent.
+func parseOracleVersion(p []byte) string {
+	s := string(p)
+	idx := strings.Index(s, "VSNNUM=")
+	if idx < 0 {
+		return ""
+	}
+	rest := s[idx+len("VSNNUM="):]
+	end := 0
+	for end < len(rest) && rest[end] >= '0' && rest[end] <= '9' {
+		end++
+	}
+	if end == 0 {
+		return ""
+	}
+	num, err := strconv.ParseUint(rest[:end], 10, 32)
+	if err != nil || num == 0 {
+		return ""
+	}
+	// VSNNUM packs version as nibbles/bytes: AABCCDD -> A.B.C.D
+	v := uint32(num)
+	return fmt.Sprintf("%d.%d.%d.%d", (v>>24)&0xff, (v>>20)&0x0f, (v>>12)&0xff, (v>>8)&0x0f)
 }
 
 // isPrintableASCII reports whether s is non-empty and all printable ASCII.
