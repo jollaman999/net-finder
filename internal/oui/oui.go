@@ -506,6 +506,30 @@ func (db *OUIDatabase) Lookup(mac net.HardwareAddr) string {
 	return "Unknown"
 }
 
+// OUIPrefixes returns all registered 24-bit OUI prefixes (globally-unique
+// unicast only) as 3-byte arrays. Used to synthesize MACs that look like real
+// vendor devices rather than obviously software-generated locally-administered
+// addresses.
+func (db *OUIDatabase) OUIPrefixes() [][3]byte {
+	out := make([][3]byte, 0, len(db.Vendors))
+	for key := range db.Vendors {
+		// Accept only canonical 24-bit prefixes "XX:XX:XX".
+		if len(key) != 8 || key[2] != ':' || key[5] != ':' {
+			continue
+		}
+		var p [3]byte
+		if _, err := fmt.Sscanf(key, "%02X:%02X:%02X", &p[0], &p[1], &p[2]); err != nil {
+			continue
+		}
+		// Skip multicast (bit0) and locally-administered (bit1) first octets.
+		if p[0]&0x03 != 0 {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 func (db *OUIDatabase) FormatMAC(mac net.HardwareAddr) string {
 	if len(mac) < 6 {
 		return mac.String()

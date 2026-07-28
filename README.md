@@ -7,12 +7,13 @@ A real-time network scanner and monitoring dashboard with a built-in web UI. Net
 ## Features
 
 - **IPv4 & IPv6 dual-stack support** — Scan IPv4-only, IPv6-only, or both simultaneously with the `-mode` flag
-- **ARP-based host discovery** — Scans subnets using ARP requests and passively captures ARP traffic to discover all active IPv4 hosts
+- **ARP-based host discovery** — Scans directly-attached subnets using ARP requests and passively captures ARP traffic to discover all active IPv4 hosts
 - **NDP-based host discovery** — Discovers IPv6 hosts via Neighbor Discovery Protocol multicast solicitations
-- **IP conflict detection** — Identifies multiple MAC addresses claiming the same IP (both IPv4 and IPv6), distinguishing real conflicts from NIC bonding/teaming
+- **Cross-subnet discovery** — For subnets outside the interface's own range, real MACs are harvested from L2-reachable secondary subnets (same broadcast domain) using a stable per-subnet synthetic identity — a genuine-vendor-OUI MAC plus a free in-subnet source IP found via RFC 5227 probes. Truly routed subnets are discovered via ordinary L3 traffic (TCP connects + ICMP echo) from the real source IP, never source-spoofed
+- **IP conflict detection** — Identifies multiple MAC addresses claiming the same IP (both IPv4 and IPv6) and classifies them: genuine collisions are flagged, while systematic VIP / NIC-bond / SDN patterns (a MAC shared across IPs, a repeated vendor pair, OpenStack overlays, all-local MACs) are labelled *likely VIP/bond* and kept out of the alert stream
 - **DHCP/DHCPv6 server detection** — Discovers DHCP and DHCPv6 servers on the network and reports offered IPs, subnet masks, routers, and DNS servers
-- **Hostname resolution** — Resolves hostnames via DNS PTR, NetBIOS, mDNS, SNMP sysName, TLS certificates, SMTP banners, and LLDP/CDP cross-reference. In IPv6-only mode, uses internal ARP to share hostnames via MAC address matching
-- **HTTP/HTTPS service detection** — After the initial scan, runs a background full 65535-port TCP scan on every host. Open ports are probed for HTTP/HTTPS services with automatic identification via HTML titles, `X-*-Version` headers, `Server` headers, and JSON API responses. Follows redirects up to 3 hops. Results are displayed incrementally with real-time progress tracking
+- **Hostname resolution** — Resolves hostnames via DNS PTR, NetBIOS, mDNS, TLS certificates, SMTP banners, and passive LLDP/CDP cross-reference. In IPv6-only mode, uses internal ARP to share hostnames via MAC address matching
+- **Service detection** — After the initial scan, a background port scan runs on every host: a curated list of common ports is scanned first so services surface immediately, then the remaining ports are swept, at a latency-adaptive rate. Open ports are probed for HTTP/HTTPS (identified via HTML titles, `X-*-Version`/`Server` headers, JSON API responses, following redirects up to 3 hops) and for common databases (MySQL/MariaDB, PostgreSQL, Redis, MongoDB, Memcached, MSSQL, Oracle). Results are displayed incrementally with real-time progress tracking
 - **OUI vendor lookup** — Maps MAC addresses to hardware vendors using the IEEE OUI database
 - **Network protocol listeners**
   - **HSRP** (Hot Standby Router Protocol) — Detects Cisco HSRP v1/v2 advertisements
@@ -96,6 +97,9 @@ sudo ./net-finder [options]
 | `-p` | `9090` | Web dashboard port |
 | `-auto` | `true` | Start scanning automatically on launch |
 | `-mode` | `both` | IP version mode: `ipv4`, `ipv6`, or `both` |
+| `-arp-rate` | `10` | Max ARP packets/sec (kept low to stay under Dynamic ARP Inspection thresholds) |
+| `-probe-rate` | `100` | Max routed L3 liveness probes/sec |
+| `-portscan-rate` | `500` | Ceiling for the latency-adaptive port-scan rate (conns/sec) |
 
 ### Examples
 
@@ -125,14 +129,15 @@ The web dashboard opens automatically at `http://localhost:9090` (or your chosen
 
 1. **OUI database load** — Downloads and caches the IEEE OUI vendor database
 2. **Parallel scanning** — Runs all discovery phases concurrently (based on `-mode`):
-   - ARP scan across IPv4 subnets and/or NDP scan across IPv6 subnets, followed by hostname resolution
+   - ARP scan across attached IPv4 subnets, MAC harvest / L3 probes across remote subnets, and/or NDP scan across IPv6 subnets, followed by hostname resolution
    - DHCP/DHCPv6 server detection, followed by DNS spoofing checks
    - Protocol listeners for HSRP, VRRP, LLDP, and CDP (30-second capture windows)
 3. **Background monitoring** — After the initial scan completes, continuously listens for:
    - New HSRP/VRRP/LLDP/CDP advertisements
    - ARP traffic anomalies indicating potential spoofing (IPv4)
    - NDP traffic anomalies indicating potential spoofing (IPv6)
-4. **Background HTTP/HTTPS scan** — Full TCP port scan (65535 ports) on each host, probing open ports for HTTP/HTTPS services. IPv4 hosts are scanned first, then IPv6. Results update incrementally in the web UI
+   - Newly-appeared subnets and hosts, folded in automatically (rate-limited)
+4. **Background service scan** — Two-tier TCP port scan on each host (common ports first, then the remaining sweep) at a latency-adaptive rate, probing open ports for HTTP/HTTPS and database services. IPv4 hosts are scanned first, then IPv6. Results update incrementally in the web UI
 
 Packet capture uses Linux `AF_PACKET` raw sockets with kernel-level BPF filters, bypassing the need for libpcap. Packet parsing is handled by `gopacket/layers` (pure Go).
 

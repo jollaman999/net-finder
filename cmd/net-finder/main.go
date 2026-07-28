@@ -29,7 +29,7 @@ func main() {
 	ipModeStr := flag.String("mode", "both", "IP version: ipv4, ipv6, both")
 	arpRate := flag.Int("arp-rate", 10, "max ARP packets/sec (keep low to avoid Dynamic ARP Inspection)")
 	probeRate := flag.Int("probe-rate", 100, "max routed L3 liveness probes per sec")
-	portScanRate := flag.Int("portscan-rate", 50, "max full port-scan connections per sec (kept low; 1-65535 sweep)")
+	portScanRate := flag.Int("portscan-rate", 500, "ceiling for the adaptive (latency-based) port-scan rate in conns/sec")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Net Finder\n\n")
@@ -56,7 +56,13 @@ func main() {
 	// switch storm-control or Dynamic ARP Inspection.
 	netutil.SetARPRate(*arpRate)
 	netutil.SetProbeRate(*probeRate)
-	netutil.SetPortScanRate(*portScanRate)
+	// Port scan starts conservatively and adapts up/down within [50, ceiling]
+	// based on responsive-port latency.
+	portScanStart := 200
+	if *portScanRate < portScanStart {
+		portScanStart = *portScanRate
+	}
+	netutil.EnablePortScanAdaptive(50, *portScanRate, portScanStart)
 
 	// Get network interface
 	iface, err := netutil.GetInterfaceForMode(*ifaceName, mode)

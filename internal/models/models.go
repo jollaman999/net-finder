@@ -55,6 +55,12 @@ type ConflictEntry struct {
 	MACs     []string `json:"macs"`
 	Vendors  []string `json:"vendors"`
 	Subnet   string   `json:"subnet"`
+	// Kind classifies the multi-MAC entry: "conflict" (a genuine, likely-accidental
+	// IP collision) or "likely" (a probable VIP/bond/SDN pattern, not a real
+	// collision). Reason is a machine code for the "likely" verdict (see
+	// classifyConflicts): shared_mac, oui_pair, neutron, all_laa.
+	Kind   string `json:"kind,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // ConflictResolvedEntry represents a resolved IP conflict

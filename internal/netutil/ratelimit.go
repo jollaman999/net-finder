@@ -11,10 +11,12 @@ import (
 type Limiter struct {
 	tokens chan struct{}
 	stop   chan struct{}
+	rateCh chan int // requests to change the refill rate at runtime
 }
 
 // NewLimiter creates a limiter permitting perSec operations per second with a
-// small burst allowance. perSec <= 0 returns nil (unlimited).
+// small burst allowance. perSec <= 0 returns nil (unlimited). The rate can be
+// changed later with SetRate (the burst allowance stays fixed at creation).
 func NewLimiter(perSec int) *Limiter {
 	if perSec <= 0 {
 		return nil
@@ -23,30 +25,59 @@ func NewLimiter(perSec int) *Limiter {
 	if burst < 1 {
 		burst = 1
 	}
+	l := &Limiter{
+		tokens: make(chan struct{}, burst),
+		stop:   make(chan struct{}),
+		rateCh: make(chan int, 1),
+	}
+	go l.run(perSec)
+	return l
+}
+
+func (l *Limiter) run(perSec int) {
 	interval := time.Second / time.Duration(perSec)
 	if interval <= 0 {
 		interval = time.Microsecond
 	}
-	l := &Limiter{
-		tokens: make(chan struct{}, burst),
-		stop:   make(chan struct{}),
-	}
-	go func() {
-		t := time.NewTicker(interval)
-		defer t.Stop()
-		for {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-l.stop:
+			return
+		case n := <-l.rateCh:
+			if n <= 0 {
+				n = 1
+			}
+			interval = time.Second / time.Duration(n)
+			if interval <= 0 {
+				interval = time.Microsecond
+			}
+			t.Reset(interval)
+		case <-t.C:
 			select {
-			case <-l.stop:
-				return
-			case <-t.C:
-				select {
-				case l.tokens <- struct{}{}:
-				default:
-				}
+			case l.tokens <- struct{}{}:
+			default:
 			}
 		}
-	}()
-	return l
+	}
+}
+
+// SetRate changes the refill rate (operations/sec) of a running limiter in
+// place. A nil limiter is a no-op.
+func (l *Limiter) SetRate(perSec int) {
+	if l == nil {
+		return
+	}
+	// Coalesce: keep only the most recent request.
+	select {
+	case <-l.rateCh:
+	default:
+	}
+	select {
+	case l.rateCh <- perSec:
+	case <-l.stop:
+	}
 }
 
 // Acquire blocks until the limiter permits one operation. A nil limiter is a
@@ -109,6 +140,15 @@ func SetPortScanRate(perSec int) {
 	defer limiterMu.Unlock()
 	portScanLimiter.Stop()
 	portScanLimiter = NewLimiter(perSec)
+}
+
+// PortScanSetRate adjusts the running port-scan limiter's rate in place (used by
+// the adaptive controller). n <= 0 is treated as 1.
+func PortScanSetRate(perSec int) {
+	limiterMu.RLock()
+	l := portScanLimiter
+	limiterMu.RUnlock()
+	l.SetRate(perSec)
 }
 
 // ARPAcquire blocks until the global ARP limiter permits one send.

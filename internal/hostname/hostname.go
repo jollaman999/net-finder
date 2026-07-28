@@ -18,6 +18,39 @@ import (
 	"net-finder/internal/netutil"
 )
 
+// topPorts is a curated list of the most commonly used TCP ports. It is scanned
+// first so a host's services show up almost immediately; the remaining ports are
+// swept afterwards to catch anything unusual. Covers web, remote admin, mail,
+// databases, message brokers, and common app/dev-tool ports.
+var topPorts = []int{
+	21, 22, 23, 25, 53, 80, 81, 88, 110, 111, 135, 139, 143, 161, 389, 443, 445,
+	465, 514, 515, 548, 587, 623, 631, 636, 873, 990, 993, 995, 1025, 1080, 1194,
+	1433, 1521, 1723, 1883, 2049, 2082, 2083, 2086, 2087, 2095, 2096, 2181, 2222,
+	2375, 2376, 3000, 3128, 3268, 3306, 3389, 3690, 4000, 4040, 4443, 4444, 4567,
+	4848, 5000, 5001, 5044, 5060, 5432, 5433, 5601, 5672, 5900, 5901, 5984, 6000,
+	6379, 6380, 6443, 6600, 6666, 6667, 7000, 7001, 7070, 7077, 7443, 7474, 7687,
+	8000, 8006, 8008, 8009, 8010, 8060, 8080, 8081, 8082, 8083, 8086, 8088, 8090,
+	8091, 8096, 8123, 8161, 8180, 8200, 8222, 8291, 8333, 8443, 8500, 8530, 8531,
+	8545, 8686, 8765, 8787, 8800, 8834, 8880, 8888, 8983, 9000, 9001, 9042, 9043,
+	9090, 9091, 9092, 9100, 9200, 9300, 9418, 9443, 9600, 9990, 9999, 10000,
+	10250, 11211, 15672, 16379, 27017, 27018, 28017, 32400, 50000, 50070, 55672,
+}
+
+// remainingPorts is every TCP port not in topPorts, swept in the second pass.
+var remainingPorts []int
+
+func init() {
+	inTop := make(map[int]bool, len(topPorts))
+	for _, p := range topPorts {
+		inTop[p] = true
+	}
+	for p := 1; p <= 65535; p++ {
+		if !inTop[p] {
+			remainingPorts = append(remainingPorts, p)
+		}
+	}
+}
+
 // ResolveHostnames resolves hostnames for a list of IPs using multiple methods:
 // 1. DNS PTR (reverse DNS)
 // 2. NetBIOS Name Service (UDP 137) - Windows/Samba hosts
@@ -105,7 +138,11 @@ func ResolveNotesStream(ips []string, stopCh <-chan struct{}, onResult func(ip, 
 			return
 		default:
 		}
-		note := resolveHTTP(ip, sem, stopCh)
+		note := resolveHTTP(ip, sem, stopCh, func(partial string) {
+			if partial != "" {
+				onResult(ip, partial)
+			}
+		})
 		if note != "" {
 			onResult(ip, note)
 		}
@@ -440,71 +477,111 @@ func resolveSMTP(ip string) string {
 	return hostname
 }
 
-// resolveHTTP scans all TCP ports on an IP, then probes HTTP on open ports.
-func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}) string {
-	// Phase 1: Full port scan
-	type portResult struct{ port int }
-	results := make(chan portResult, 256)
-	var scanWg sync.WaitGroup
-
-	for port := 1; port <= 65535; port++ {
-		select {
-		case <-stopCh:
-			scanWg.Wait()
-			return ""
-		case sem <- struct{}{}:
-		}
-
-		scanWg.Add(1)
-		go func(p int) {
-			defer func() { <-sem; scanWg.Done() }()
-			netutil.PortScanAcquire() // dedicated (lower) rate limit for the port-scan sweep
-			conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, strconv.Itoa(p)), 200*time.Millisecond)
-			if err != nil {
-				return
-			}
-			conn.Close()
-			results <- portResult{p}
-		}(port)
-	}
-
-	go func() { scanWg.Wait(); close(results) }()
-
-	var openPorts []int
-	for r := range results {
-		openPorts = append(openPorts, r.port)
-	}
-	sort.Ints(openPorts)
-
-	if len(openPorts) == 0 {
-		return ""
-	}
-
-	// Phase 2: HTTP probe on open ports; ports that aren't HTTP are probed for
-	// well-known database services (sequential — few ports).
+// resolveHTTP scans a host's TCP ports and probes open ports for HTTP(S) and
+// database services. Scanning is two-phase: the curated topPorts are scanned
+// first and, if they yield any services, onPartial is called with an early note;
+// the remaining ports are then swept and the full note is returned. onPartial may
+// be nil. The returned string is the complete note (empty if nothing was found).
+func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}, onPartial func(string)) string {
 	var httpResults, httpsResults []webProbeResult
 	var dbResults []dbProbeResult
-	for _, p := range openPorts {
-		select {
-		case <-stopCh:
-			return ""
-		default:
-		}
-		ps := strconv.Itoa(p)
-		if r := tryHTTP(ip, ps); r != nil {
-			if r.isTLS {
-				httpsResults = append(httpsResults, *r)
-			} else {
-				httpResults = append(httpResults, *r)
+	probed := make(map[int]bool)
+
+	// probeOpen classifies each newly-open port as HTTP, HTTPS, or a database
+	// service, accumulating into the shared result slices.
+	probeOpen := func(openPorts []int) {
+		for _, p := range openPorts {
+			select {
+			case <-stopCh:
+				return
+			default:
 			}
-			continue
-		}
-		if d := tryDB(ip, ps); d != nil {
-			dbResults = append(dbResults, *d)
+			if probed[p] {
+				continue
+			}
+			probed[p] = true
+			ps := strconv.Itoa(p)
+			if r := tryHTTP(ip, ps); r != nil {
+				if r.isTLS {
+					httpsResults = append(httpsResults, *r)
+				} else {
+					httpResults = append(httpResults, *r)
+				}
+				continue
+			}
+			if d := tryDB(ip, ps); d != nil {
+				dbResults = append(dbResults, *d)
+			}
 		}
 	}
 
-	// Sort by port number
+	// Phase 1: curated top ports — fast, surfaces common services immediately.
+	probeOpen(scanPorts(ip, topPorts, sem, stopCh))
+	note := buildServiceNote(httpResults, httpsResults, dbResults)
+	if note != "" && onPartial != nil {
+		onPartial(note)
+	}
+
+	select {
+	case <-stopCh:
+		return note
+	default:
+	}
+
+	// Phase 2: everything else — catches services on non-standard ports.
+	probeOpen(scanPorts(ip, remainingPorts, sem, stopCh))
+	return buildServiceNote(httpResults, httpsResults, dbResults)
+}
+
+// scanPorts TCP-connect scans the given ports on an IP and returns the open ones,
+// sorted ascending. Each connection is bounded by the shared semaphore and the
+// global port-scan rate limiter.
+func scanPorts(ip string, ports []int, sem chan struct{}, stopCh <-chan struct{}) []int {
+	results := make(chan int, 256)
+	var scanWg sync.WaitGroup
+
+	go func() {
+		for _, port := range ports {
+			select {
+			case <-stopCh:
+				scanWg.Wait()
+				close(results)
+				return
+			case sem <- struct{}{}:
+			}
+			scanWg.Add(1)
+			go func(p int) {
+				defer func() { <-sem; scanWg.Done() }()
+				netutil.PortScanAcquire()
+				start := time.Now()
+				conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, strconv.Itoa(p)), 200*time.Millisecond)
+				elapsed := time.Since(start)
+				if err == nil {
+					conn.Close()
+					netutil.PortScanObserve(elapsed, true)
+					results <- p
+					return
+				}
+				// A refusal means the host answered (fast RTT signal); a timeout
+				// means no response (usually a filtered port) — not a delay signal.
+				netutil.PortScanObserve(elapsed, strings.Contains(err.Error(), "refused"))
+			}(port)
+		}
+		scanWg.Wait()
+		close(results)
+	}()
+
+	var open []int
+	for p := range results {
+		open = append(open, p)
+	}
+	sort.Ints(open)
+	return open
+}
+
+// buildServiceNote formats detected HTTP/HTTPS/DB services into the host note.
+// Returns "" when nothing was detected.
+func buildServiceNote(httpResults, httpsResults []webProbeResult, dbResults []dbProbeResult) string {
 	sortResults := func(rs []webProbeResult) {
 		sort.Slice(rs, func(i, j int) bool {
 			pi, _ := strconv.Atoi(rs[i].port)

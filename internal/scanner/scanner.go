@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -63,6 +64,11 @@ type Scanner struct {
 	// Per-host miss count for liveness tracking (IPv4)
 	hostMissCount map[string]int
 	hostMissMu    sync.Mutex
+
+	// L2 MAC harvesting for same-broadcast-domain secondary subnets (Case A):
+	// remote (non-attached) subnets are ARP-scanned from a stable per-subnet
+	// synthetic identity to recover real MACs.
+	subnetIDs *protocol.SubnetIdentityStore
 }
 
 // bgScanBegin/bgScanEnd bracket a background scan task; bgScanning reports
@@ -109,6 +115,7 @@ func NewScanner(iface *net.Interface, localIP, localIPv6, linkLocalIPv6 net.IP,
 		emailedARPKeys: make(map[string]bool),
 		emailedNDPKeys: make(map[string]bool),
 		hostMissCount:  make(map[string]int),
+		subnetIDs:      protocol.NewSubnetIdentityStore(),
 	}
 }
 
@@ -419,6 +426,11 @@ func (s *Scanner) run() {
 		}
 	}
 	s.oui = ouiDB
+	// Seed synthetic-identity MACs with real vendor OUIs so cross-subnet probes
+	// look like genuine devices rather than software-generated addresses.
+	if s.subnetIDs != nil {
+		s.subnetIDs.SetOUIPool(ouiDB.OUIPrefixes())
+	}
 	s.setProgress("oui_done", 5, len(ouiDB.Vendors))
 	if s.stopped() {
 		return
@@ -671,6 +683,7 @@ func (s *Scanner) processARPResults(result *protocol.ARPResult) {
 		}
 	}
 	s.state.Hosts = append(keep, sorted...)
+	classifyConflicts(conflicts)
 	s.state.Conflicts = conflicts
 	s.state.Mu.Unlock()
 
@@ -679,9 +692,39 @@ func (s *Scanner) processARPResults(result *protocol.ARPResult) {
 		go s.alertMgr.SendHostAlerts(sorted)
 	}
 
-	// Send alerts for detected conflicts (grouped by subnet)
-	if s.alertMgr != nil && len(conflicts) > 0 {
-		go s.alertMgr.SendConflictAlerts(conflicts)
+	// Send alerts only for genuine conflicts, not VIP/bond/SDN patterns.
+	realConflicts := filterRealConflicts(conflicts)
+	if s.alertMgr != nil && len(realConflicts) > 0 {
+		go s.alertMgr.SendConflictAlerts(realConflicts)
+	}
+}
+
+// filterRealConflicts returns only the entries classified as genuine conflicts.
+func filterRealConflicts(conflicts []models.ConflictEntry) []models.ConflictEntry {
+	var out []models.ConflictEntry
+	for _, c := range conflicts {
+		if c.Kind == "conflict" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// reclassifyAndAlert re-runs conflict classification over the full conflict set
+// (cross-IP signals need the whole set) and alerts only for newly-added entries
+// that remain genuine conflicts.
+func (s *Scanner) reclassifyAndAlert(addedIPs map[string]bool) {
+	s.state.Mu.Lock()
+	classifyConflicts(s.state.Conflicts)
+	var realAdded []models.ConflictEntry
+	for _, c := range s.state.Conflicts {
+		if addedIPs[c.IP] && c.Kind == "conflict" {
+			realAdded = append(realAdded, c)
+		}
+	}
+	s.state.Mu.Unlock()
+	if len(realAdded) > 0 && s.alertMgr != nil {
+		go s.alertMgr.SendConflictAlerts(realAdded)
 	}
 }
 
@@ -1033,6 +1076,11 @@ func (s *Scanner) ingestObserved(observed map[string]string, baseline map[string
 		if macStr == localMACStr {
 			continue
 		}
+		// Skip our own synthetic L2-harvest identities (their probe traffic and
+		// adopted source IPs are our own, not real hosts).
+		if s.subnetIDs != nil && (s.subnetIDs.IsSyntheticMAC(macStr) || s.subnetIDs.IsSyntheticIP(ipStr)) {
+			continue
+		}
 
 		// Learn a new subnet if this IP falls outside every known subnet.
 		if s.findSubnet(ip) == "" {
@@ -1119,7 +1167,17 @@ func (s *Scanner) sweepSubnets(subnets []*net.IPNet) {
 		}
 	}
 	if len(remote) > 0 {
+		s.harvestRemoteMACs(remote)
 		s.mergeL3Alive(protocol.L3ProbeScan(remote, s.localIP, 3*time.Second))
+	}
+}
+
+// harvestRemoteMACs ARP-scans L2-reachable secondary subnets (Case A) from
+// per-subnet synthetic identities and merges the recovered IP→MAC pairs. Truly
+// routed subnets simply yield no ARP replies and fall through to the L3 probe.
+func (s *Scanner) harvestRemoteMACs(remote []*net.IPNet) {
+	if res := protocol.HarvestRemoteMACs(s.iface, remote, s.localIP, s.subnetIDs, 3*time.Second); res != nil {
+		s.mergeARPResult(res)
 	}
 }
 
@@ -1139,6 +1197,7 @@ func (s *Scanner) probeRemoteSubnets(subnets []*net.IPNet) {
 		return
 	}
 	s.bgScanBegin()
+	s.harvestRemoteMACs(remote)
 	alive := protocol.L3ProbeScan(remote, s.localIP, 3*time.Second)
 	s.bgScanEnd()
 	s.mergeL3Alive(alive)
@@ -1230,8 +1289,12 @@ func (s *Scanner) mergeARPResult(result *protocol.ARPResult) {
 			go s.alertMgr.SendHostAlerts(addedHosts)
 		}
 	}
-	if len(addedConflicts) > 0 && s.alertMgr != nil {
-		go s.alertMgr.SendConflictAlerts(addedConflicts)
+	if len(addedConflicts) > 0 {
+		addedIPs := make(map[string]bool, len(addedConflicts))
+		for _, c := range addedConflicts {
+			addedIPs[c.IP] = true
+		}
+		s.reclassifyAndAlert(addedIPs)
 	}
 }
 
@@ -1472,7 +1535,127 @@ func (s *Scanner) addConflicts(conflicts []models.ConflictEntry) []models.Confli
 		s.state.Conflicts = append(s.state.Conflicts, c)
 		added = append(added, c)
 	}
+	// Classify synchronously here (cross-IP signals need the full set) so the
+	// kind/reason labels are set the moment a conflict is added, independent of
+	// any slower downstream work (e.g. hostname resolution).
+	if len(added) > 0 {
+		classifyConflicts(s.state.Conflicts)
+	}
 	return added
+}
+
+// classifyConflicts labels each multi-MAC entry as a genuine "conflict" or a
+// "likely" VIP/bond/SDN pattern, using cross-IP signals so systematic setups are
+// not reported as accidental IP collisions. It mutates entries in place.
+//
+// Downgrade signals (strongest first):
+//   - shared_mac: a MAC also answers for another IP → one host holds several IPs
+//     (VIP / bond / floating IP).
+//   - oui_pair:   the same set of vendor OUIs conflicts on more than one IP → a
+//     systematic multi-NIC or VIP deployment, not random collisions.
+//   - neutron:    an OpenStack (fa:16:3e) VM MAC alongside another responder → an
+//     SDN/overlay ARP responder.
+//   - all_laa:    every MAC is locally-administered → virtual NICs (VM/bond).
+//
+// A genuine accidental collision — two unrelated global-vendor MACs, appearing on
+// a single IP with no repeated pattern — keeps kind "conflict".
+func classifyConflicts(conflicts []models.ConflictEntry) {
+	if len(conflicts) == 0 {
+		return
+	}
+
+	macIPs := make(map[string]map[string]bool)     // mac -> set of IPs
+	ouiSetIPs := make(map[string]map[string]bool)  // sorted OUI-set -> set of IPs
+	for _, c := range conflicts {
+		macs := lowerMACs(c.MACs)
+		for _, m := range macs {
+			if macIPs[m] == nil {
+				macIPs[m] = make(map[string]bool)
+			}
+			macIPs[m][c.IP] = true
+		}
+		key := ouiSetKey(macs)
+		if ouiSetIPs[key] == nil {
+			ouiSetIPs[key] = make(map[string]bool)
+		}
+		ouiSetIPs[key][c.IP] = true
+	}
+
+	for i := range conflicts {
+		c := &conflicts[i]
+		macs := lowerMACs(c.MACs)
+
+		sharedMAC := false
+		for _, m := range macs {
+			if len(macIPs[m]) > 1 {
+				sharedMAC = true
+				break
+			}
+		}
+		sharedPair := len(ouiSetIPs[ouiSetKey(macs)]) > 1
+
+		allLAA, anyNeutron := true, false
+		for _, m := range macs {
+			if !isLAAMac(m) {
+				allLAA = false
+			}
+			if strings.HasPrefix(m, "fa:16:3e") {
+				anyNeutron = true
+			}
+		}
+
+		switch {
+		case sharedMAC:
+			c.Kind, c.Reason = "likely", "shared_mac"
+		case sharedPair:
+			c.Kind, c.Reason = "likely", "oui_pair"
+		case anyNeutron:
+			c.Kind, c.Reason = "likely", "neutron"
+		case allLAA:
+			c.Kind, c.Reason = "likely", "all_laa"
+		default:
+			c.Kind, c.Reason = "conflict", ""
+		}
+	}
+}
+
+func lowerMACs(macs []string) []string {
+	out := make([]string, len(macs))
+	for i, m := range macs {
+		out[i] = strings.ToLower(m)
+	}
+	return out
+}
+
+// ouiSetKey returns a stable key from the sorted set of distinct 24-bit OUIs in a
+// MAC list, so the same vendor combination maps to the same key regardless of the
+// device-specific suffix or ordering.
+func ouiSetKey(macs []string) string {
+	set := make(map[string]bool)
+	for _, m := range macs {
+		if len(m) >= 8 {
+			set[m[:8]] = true
+		}
+	}
+	list := make([]string, 0, len(set))
+	for o := range set {
+		list = append(list, o)
+	}
+	sort.Strings(list)
+	return strings.Join(list, "|")
+}
+
+// isLAAMac reports whether a MAC string's first octet has the
+// locally-administered bit set.
+func isLAAMac(mac string) bool {
+	if len(mac) < 2 {
+		return false
+	}
+	b, err := strconv.ParseUint(mac[:2], 16, 16)
+	if err != nil {
+		return false
+	}
+	return byte(b)&0x02 != 0
 }
 
 // sortHostsByIP sorts a host slice by IP (IPv4 and IPv6 ordered together).
@@ -1998,6 +2181,7 @@ func (s *Scanner) backgroundARPMonitor() {
 								Vendors: conflictVendors,
 								Subnet:  a.Subnet,
 							})
+							classifyConflicts(s.state.Conflicts)
 						}
 					}
 					if !s.emailedARPKeys[key] {
