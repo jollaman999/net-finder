@@ -382,11 +382,11 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 
 	if hasEventV4(cfg, "conflicts") {
 		testConflicts := []models.ConflictEntry{
-			{IP: "192.168.1.100", MACs: []string{"AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02"}, Vendors: []string{"Vendor A", "Vendor B"}, Subnet: "192.168.1.0/24"},
-			{IP: "192.168.1.200", MACs: []string{"11:22:33:44:55:01", "11:22:33:44:55:02", "11:22:33:44:55:03"}, Vendors: []string{"Vendor C", "Vendor D", "Vendor E"}, Subnet: "192.168.1.0/24"},
+			{IP: "192.0.2.100", MACs: []string{"AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02"}, Vendors: []string{"Vendor A", "Vendor B"}, Subnet: "192.0.2.0/24"},
+			{IP: "192.0.2.200", MACs: []string{"11:22:33:44:55:01", "11:22:33:44:55:02", "11:22:33:44:55:03"}, Vendors: []string{"Vendor C", "Vendor D", "Vendor E"}, Subnet: "192.0.2.0/24"},
 		}
-		subject := fmt.Sprintf("[Net Finder] IP Conflict - %s (%d)", "192.168.1.0/24", len(testConflicts))
-		body := buildHTMLReport("192.168.1.0/24", testConflicts)
+		subject := fmt.Sprintf("[Net Finder] IP Conflict - %s (%d)", "192.0.2.0/24", len(testConflicts))
+		body := buildHTMLReport("192.0.2.0/24", testConflicts)
 		if err := sendEmailHTML(cfg, subject, body); err != nil {
 			lastErr = err
 		} else {
@@ -396,10 +396,10 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 
 	if hasEventV4(cfg, "conflict_resolved") {
 		testResolved := []models.ConflictResolvedEntry{
-			{IP: "192.168.1.100", PrevMACs: []string{"AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02"}, PrevVendors: []string{"Vendor A", "Vendor B"}, CurrentMAC: "AA:BB:CC:DD:EE:01", CurrentVendor: "Vendor A", RemovedNewIPs: map[string]string{"AA:BB:CC:DD:EE:02": "192.168.1.150"}, Subnet: "192.168.1.0/24"},
+			{IP: "192.0.2.100", PrevMACs: []string{"AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02"}, PrevVendors: []string{"Vendor A", "Vendor B"}, CurrentMAC: "AA:BB:CC:DD:EE:01", CurrentVendor: "Vendor A", RemovedNewIPs: map[string]string{"AA:BB:CC:DD:EE:02": "192.0.2.150"}, Subnet: "192.0.2.0/24"},
 		}
-		subject := fmt.Sprintf("[Net Finder] IP Conflict Resolved - %s (%d)", "192.168.1.0/24", len(testResolved))
-		body := buildConflictResolvedHTMLReport("192.168.1.0/24", testResolved)
+		subject := fmt.Sprintf("[Net Finder] IP Conflict Resolved - %s (%d)", "192.0.2.0/24", len(testResolved))
+		body := buildConflictResolvedHTMLReport("192.0.2.0/24", testResolved)
 		if err := sendEmailHTML(cfg, subject, body); err != nil {
 			lastErr = err
 		} else {
@@ -409,12 +409,12 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 
 	if hasEventV4(cfg, "hosts") {
 		testHosts := []models.HostEntry{
-			{IP: "192.168.1.1", Hostname: "gateway.local", MAC: "AA:BB:CC:DD:EE:01", Vendor: "Cisco Systems", Subnet: "192.168.1.0/24"},
-			{IP: "192.168.1.10", Hostname: "server.local", MAC: "11:22:33:44:55:66", Vendor: "Dell Inc.", Subnet: "192.168.1.0/24"},
-			{IP: "192.168.1.20", MAC: "FF:EE:DD:CC:BB:AA", Vendor: "HP Enterprise", Subnet: "192.168.1.0/24"},
+			{IP: "192.0.2.1", Hostname: "gateway.local", MAC: "AA:BB:CC:DD:EE:01", Vendor: "Cisco Systems", Subnet: "192.0.2.0/24"},
+			{IP: "192.0.2.10", Hostname: "server.local", MAC: "11:22:33:44:55:66", Vendor: "Dell Inc.", Subnet: "192.0.2.0/24"},
+			{IP: "192.0.2.20", MAC: "FF:EE:DD:CC:BB:AA", Vendor: "HP Enterprise", Subnet: "192.0.2.0/24"},
 		}
-		subject := fmt.Sprintf("[Net Finder] Host Discovery - %s (%d hosts)", "192.168.1.0/24", len(testHosts))
-		body := buildHostHTMLReport("192.168.1.0/24", testHosts)
+		subject := fmt.Sprintf("[Net Finder] Host Discovery - %s (%d hosts)", "192.0.2.0/24", len(testHosts))
+		body := buildHostHTMLReport("192.0.2.0/24", testHosts)
 		if err := sendEmailHTML(cfg, subject, body); err != nil {
 			lastErr = err
 		} else {
@@ -424,7 +424,7 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 
 	if hasEventV4(cfg, "dhcp") {
 		testDHCP := []models.DHCPServerJSON{
-			{ServerIP: "192.168.1.1", ServerMAC: "AA:BB:CC:DD:EE:01", Vendor: "Cisco Systems", OfferedIP: "192.168.1.100", SubnetMask: "255.255.255.0", Router: "192.168.1.1", DNS: []string{"8.8.8.8", "8.8.4.4"}, LeaseTime: 86400},
+			{ServerIP: "192.0.2.1", ServerMAC: "AA:BB:CC:DD:EE:01", Vendor: "Cisco Systems", OfferedIP: "192.0.2.100", SubnetMask: "255.255.255.0", Router: "192.0.2.1", DNS: []string{"8.8.8.8", "8.8.4.4"}, LeaseTime: 86400},
 		}
 		subject := fmt.Sprintf("[Net Finder] DHCP Servers Detected (%d)", len(testDHCP))
 		body := buildDHCPHTMLReport(testDHCP)
@@ -437,10 +437,10 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 
 	if hasEventV4(cfg, "hsrp_vrrp") || hasEventV6(cfg, "hsrp_vrrp") {
 		testHSRP := []models.HSRPEntry{
-			{Version: 2, Group: 1, Priority: 110, State: "Active", VirtualIP: "192.168.1.254", HelloTime: 3, HoldTime: 10, SourceIP: "192.168.1.2", SourceMAC: "00:00:0C:9F:F0:01", Timestamp: time.Now().Format("15:04:05")},
+			{Version: 2, Group: 1, Priority: 110, State: "Active", VirtualIP: "192.0.2.254", HelloTime: 3, HoldTime: 10, SourceIP: "192.0.2.2", SourceMAC: "00:00:0C:9F:F0:01", Timestamp: time.Now().Format("15:04:05")},
 		}
 		testVRRP := []models.VRRPEntry{
-			{Version: 3, RouterID: 1, Priority: 100, IPAddresses: []string{"192.168.1.254"}, AdverInt: 1, SourceIP: "192.168.1.3", SourceMAC: "00:00:5E:00:01:01", Timestamp: time.Now().Format("15:04:05")},
+			{Version: 3, RouterID: 1, Priority: 100, IPAddresses: []string{"192.0.2.254"}, AdverInt: 1, SourceIP: "192.0.2.3", SourceMAC: "00:00:5E:00:01:01", Timestamp: time.Now().Format("15:04:05")},
 		}
 		subject := "[Net Finder] HSRP/VRRP Detected"
 		body := buildProtocolHTMLReport(testHSRP, testVRRP)
@@ -453,10 +453,10 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 
 	if hasEventV4(cfg, "lldp_cdp") || hasEventV6(cfg, "lldp_cdp") {
 		testLLDP := []models.LLDPNeighbor{
-			{ChassisID: "AA:BB:CC:DD:EE:01", PortID: "Gi0/1", SysName: "switch01.local", SysDesc: "Cisco IOS", MgmtAddr: "192.168.1.2", TTL: 120, SourceMAC: "AA:BB:CC:DD:EE:01", Timestamp: time.Now().Format("15:04:05")},
+			{ChassisID: "AA:BB:CC:DD:EE:01", PortID: "Gi0/1", SysName: "switch01.local", SysDesc: "Cisco IOS", MgmtAddr: "192.0.2.2", TTL: 120, SourceMAC: "AA:BB:CC:DD:EE:01", Timestamp: time.Now().Format("15:04:05")},
 		}
 		testCDP := []models.CDPNeighbor{
-			{DeviceID: "switch02.local", Addresses: []string{"192.168.1.3"}, PortID: "Gi0/2", Platform: "cisco WS-C3750", Version: "15.0(2)SE", NativeVLAN: 1, SourceMAC: "11:22:33:44:55:66", Timestamp: time.Now().Format("15:04:05")},
+			{DeviceID: "switch02.local", Addresses: []string{"192.0.2.3"}, PortID: "Gi0/2", Platform: "cisco WS-C3750", Version: "15.0(2)SE", NativeVLAN: 1, SourceMAC: "11:22:33:44:55:66", Timestamp: time.Now().Format("15:04:05")},
 		}
 		subject := "[Net Finder] LLDP/CDP Neighbors Detected"
 		body := buildDiscoveryHTMLReport(testLLDP, testCDP)
@@ -472,12 +472,12 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 		var dnsAlerts []models.DNSSpoofAlert
 		if hasEventV4(cfg, "arp_spoofing") {
 			arpAlerts = []models.ARPSpoofAlert{
-				{IP: "192.168.1.1", OldMACs: []string{"AA:BB:CC:DD:EE:01"}, NewMAC: "FF:FF:FF:00:11:22", OldVendors: []string{"Cisco Systems"}, NewVendor: "Unknown", AlertType: "gateway_mac_change", Severity: "critical", Message: "Gateway 192.168.1.1 MAC changed", Count: 5, FirstSeen: time.Now().Add(-2 * time.Minute).Format("15:04:05"), Timestamp: time.Now().Format("15:04:05"), Subnet: "192.168.1.0/24"},
+				{IP: "192.0.2.1", OldMACs: []string{"AA:BB:CC:DD:EE:01"}, NewMAC: "FF:FF:FF:00:11:22", OldVendors: []string{"Cisco Systems"}, NewVendor: "Unknown", AlertType: "gateway_mac_change", Severity: "critical", Message: "Gateway 192.0.2.1 MAC changed", Count: 5, FirstSeen: time.Now().Add(-2 * time.Minute).Format("15:04:05"), Timestamp: time.Now().Format("15:04:05"), Subnet: "192.0.2.0/24"},
 			}
 		}
 		if hasEventV4(cfg, "dns_spoofing") || hasEventV6(cfg, "dns_spoofing") {
 			dnsAlerts = []models.DNSSpoofAlert{
-				{Domain: "example.com", Server1: "8.8.8.8", Response1: "93.184.216.34", Server2: "192.168.1.1", Response2: "10.0.0.99", AlertType: "dns_mismatch", Severity: "critical", Message: "DNS response mismatch for example.com", Timestamp: time.Now().Format("15:04:05")},
+				{Domain: "example.com", Server1: "8.8.8.8", Response1: "93.184.216.34", Server2: "192.0.2.1", Response2: "10.0.0.99", AlertType: "dns_mismatch", Severity: "critical", Message: "DNS response mismatch for example.com", Timestamp: time.Now().Format("15:04:05")},
 			}
 		}
 		subject := buildSecuritySubject(arpAlerts, dnsAlerts)
@@ -518,10 +518,10 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 	// If no events selected, send default IP Conflict test for backward compatibility
 	if sent == 0 && lastErr == nil {
 		testConflicts := []models.ConflictEntry{
-			{IP: "192.168.1.100", MACs: []string{"AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02"}, Vendors: []string{"Vendor A", "Vendor B"}, Subnet: "192.168.1.0/24"},
+			{IP: "192.0.2.100", MACs: []string{"AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02"}, Vendors: []string{"Vendor A", "Vendor B"}, Subnet: "192.0.2.0/24"},
 		}
-		subject := fmt.Sprintf("[Net Finder] IP Conflict - %s (%d)", "192.168.1.0/24", len(testConflicts))
-		body := buildHTMLReport("192.168.1.0/24", testConflicts)
+		subject := fmt.Sprintf("[Net Finder] IP Conflict - %s (%d)", "192.0.2.0/24", len(testConflicts))
+		body := buildHTMLReport("192.0.2.0/24", testConflicts)
 		return sendEmailHTML(cfg, subject, body)
 	}
 	return lastErr
