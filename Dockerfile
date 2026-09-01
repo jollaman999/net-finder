@@ -10,6 +10,9 @@ RUN CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${VERSION}" -o /net-f
 
 FROM alpine:latest
 
+# nft is how the scan takes its own source port out of connection tracking.
+RUN apk add --no-cache nftables
+
 COPY --from=builder /net-finder /usr/local/bin/net-finder
 
 EXPOSE 9090

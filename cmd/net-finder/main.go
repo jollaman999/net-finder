@@ -67,6 +67,14 @@ func main() {
 	netutil.EnablePortScanAdaptive(50, *portScanRate, portScanStart)
 	netutil.SetSYNScanRate(*synRate)
 
+	// The SYN scan sends through a raw socket, so without this conntrack
+	// allocates an entry per probe and a full sweep fills the table, at which
+	// point the kernel drops packets belonging to everything else on the box.
+	// Only the scan's own port is exempted; the rest stays tracked.
+	if err := netutil.InstallScanNotrack(protocol.SYNScanSrcPort); err != nil {
+		log.Printf("SYN scan is not exempt from conntrack (%v); a full port sweep may fill the conntrack table", err)
+	}
+
 	// Get network interface
 	iface, err := netutil.GetInterfaceForMode(*ifaceName, mode)
 	if err != nil {
