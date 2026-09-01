@@ -13,7 +13,7 @@ A real-time network scanner and monitoring dashboard with a built-in web UI. Net
 - **IP conflict detection** — Identifies multiple MAC addresses claiming the same IP (both IPv4 and IPv6) and classifies them: genuine collisions are flagged, while systematic VIP / NIC-bond / SDN patterns (a MAC shared across IPs, a repeated vendor pair, OpenStack overlays, all-local MACs) are labelled *likely VIP/bond* and kept out of the alert stream
 - **DHCP/DHCPv6 server detection** — Discovers DHCP and DHCPv6 servers on the network and reports offered IPs, subnet masks, routers, and DNS servers
 - **Hostname resolution** — Resolves hostnames via DNS PTR, NetBIOS, mDNS, TLS certificates, SMTP banners, and passive LLDP/CDP cross-reference. In IPv6-only mode, uses internal ARP to share hostnames via MAC address matching
-- **Service detection** — After the initial scan, a background port scan runs on every host: a curated list of common ports is scanned first so services surface immediately, then the remaining ports are swept, at a latency-adaptive rate. Open ports are probed for HTTP/HTTPS (identified via HTML titles, `X-*-Version`/`Server` headers, JSON API responses, following redirects up to 3 hops) and for common databases (MySQL/MariaDB, PostgreSQL, Redis, MongoDB, Memcached, MSSQL, Oracle). Results are displayed incrementally with real-time progress tracking
+- **Service detection** - After the initial scan, a background SYN scan sweeps all 65535 TCP ports on every host, over IPv4 and IPv6 alike, sending from a raw socket and reading the replies off AF_PACKET so no port costs a connection timeout. Open ports are probed for HTTP/HTTPS (identified via HTML titles, `X-*-Version`/`Server` headers, JSON API responses, following redirects up to 3 hops) and for common databases (MySQL/MariaDB, PostgreSQL, Redis, MongoDB, Memcached, MSSQL, Oracle). Results are displayed incrementally with real-time progress tracking
 - **OUI vendor lookup** — Maps MAC addresses to hardware vendors using the IEEE OUI database
 - **Network protocol listeners**
   - **HSRP** (Hot Standby Router Protocol) — Detects Cisco HSRP v1/v2 advertisements
@@ -34,6 +34,8 @@ A real-time network scanner and monitoring dashboard with a built-in web UI. Net
 - Root privileges (required for raw packet capture)
 
 No external C libraries are needed. Net Finder uses Linux AF_PACKET raw sockets directly, producing a fully static binary with no runtime dependencies.
+
+The `nft` command is used once at startup, to keep the port scan's own traffic out of connection tracking (see [How It Works](#how-it-works)). It is optional: if `nft` is missing or the process lacks `NET_ADMIN`, Net Finder logs a warning and keeps scanning.
 
 ## Build
 
@@ -99,7 +101,8 @@ sudo ./net-finder [options]
 | `-mode` | `both` | IP version mode: `ipv4`, `ipv6`, or `both` |
 | `-arp-rate` | `10` | Max ARP packets/sec (kept low to stay under Dynamic ARP Inspection thresholds) |
 | `-probe-rate` | `100` | Max routed L3 liveness probes/sec |
-| `-portscan-rate` | `500` | Ceiling for the latency-adaptive port-scan rate (conns/sec) |
+| `-syn-rate` | `20000` | SYN-scan send rate (packets/sec) for the background service scan |
+| `-portscan-rate` | `500` | Ceiling for the latency-adaptive connect-scan rate (conns/sec), used when the interface has no address of the family being scanned |
 
 ### Examples
 
@@ -137,9 +140,11 @@ The web dashboard opens automatically at `http://localhost:9090` (or your chosen
    - ARP traffic anomalies indicating potential spoofing (IPv4)
    - NDP traffic anomalies indicating potential spoofing (IPv6)
    - Newly-appeared subnets and hosts, folded in automatically (rate-limited)
-4. **Background service scan** — Two-tier TCP port scan on each host (common ports first, then the remaining sweep) at a latency-adaptive rate, probing open ports for HTTP/HTTPS and database services. IPv4 hosts are scanned first, then IPv6. Results update incrementally in the web UI
+4. **Background service scan** - SYN scan of all 65535 TCP ports on each host, IPv4 hosts first and then IPv6, probing the open ports for HTTP/HTTPS and database services. Results update incrementally in the web UI. If the interface has no address of the family being scanned, that family falls back to a latency-adaptive connect scan, which covers the same ports but has to wait on each one
 
 Packet capture uses Linux `AF_PACKET` raw sockets with kernel-level BPF filters, bypassing the need for libpcap. Packet parsing is handled by `gopacket/layers` (pure Go).
+
+The SYN scan sends from a raw socket, so the kernel would otherwise create a connection-tracking entry per probe and a full sweep would fill the conntrack table, at which point unrelated traffic on the machine starts getting dropped. To avoid that, Net Finder installs an nftables rule at startup that marks its own fixed scan source port `notrack`. Nothing else on the machine is affected, and the scan itself needs no tracking because it reads its replies from AF_PACKET rather than through the socket layer.
 
 ## API Endpoints
 
