@@ -258,7 +258,7 @@ func (am *AlertManager) SendConflictAlerts(conflicts []models.ConflictEntry) {
 			if !matchesSubnetStr(cfg, subnet) || !hasEventForSubnet(cfg, "conflicts", subnet) {
 				continue
 			}
-			subject := fmt.Sprintf("[Net Finder] IP Conflict — %s (%d)", subnet, len(entries))
+			subject := fmt.Sprintf("[Net Finder] IP Conflict - %s (%d)", subnet, len(entries))
 			body := buildHTMLReport(subnet, entries)
 			if err := sendEmailHTML(cfg, subject, body); err != nil {
 				log.Printf("alert send failed [%s] %s: %v", cfg.ID, subnet, err)
@@ -300,7 +300,7 @@ func (am *AlertManager) SendConflictResolvedAlerts(resolved []models.ConflictRes
 			if !matchesSubnetStr(cfg, subnet) || !hasEventForSubnet(cfg, "conflict_resolved", subnet) {
 				continue
 			}
-			subject := fmt.Sprintf("[Net Finder] IP Conflict Resolved — %s (%d)", subnet, len(entries))
+			subject := fmt.Sprintf("[Net Finder] IP Conflict Resolved - %s (%d)", subnet, len(entries))
 			body := buildConflictResolvedHTMLReport(subnet, entries)
 			if err := sendEmailHTML(cfg, subject, body); err != nil {
 				log.Printf("alert send failed [%s] %s: %v", cfg.ID, subnet, err)
@@ -356,7 +356,7 @@ func buildConflictResolvedHTMLReport(subnet string, entries []models.ConflictRes
 				b.WriteString(fmt.Sprintf(`<tr><td style="padding:4px 8px;width:24px"><span style="color:#1565c0">&#9679;</span></td><td style="padding:4px 8px;font-family:'Courier New',monospace;font-weight:600">%s</td><td style="padding:4px 8px">%s</td><td style="padding:4px 8px;color:#1565c0;font-size:12px">&rarr; %s (unchanged)</td></tr>`,
 					htmlEsc(m), htmlEsc(v), htmlEsc(r.IP)))
 			} else {
-				// This MAC was removed — show where it went
+				// This MAC was removed - show where it went
 				newIP := r.RemovedNewIPs[m]
 				dest := "offline"
 				if newIP != "" {
@@ -385,7 +385,7 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 			{IP: "192.168.1.100", MACs: []string{"AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02"}, Vendors: []string{"Vendor A", "Vendor B"}, Subnet: "192.168.1.0/24"},
 			{IP: "192.168.1.200", MACs: []string{"11:22:33:44:55:01", "11:22:33:44:55:02", "11:22:33:44:55:03"}, Vendors: []string{"Vendor C", "Vendor D", "Vendor E"}, Subnet: "192.168.1.0/24"},
 		}
-		subject := fmt.Sprintf("[Net Finder] IP Conflict — %s (%d)", "192.168.1.0/24", len(testConflicts))
+		subject := fmt.Sprintf("[Net Finder] IP Conflict - %s (%d)", "192.168.1.0/24", len(testConflicts))
 		body := buildHTMLReport("192.168.1.0/24", testConflicts)
 		if err := sendEmailHTML(cfg, subject, body); err != nil {
 			lastErr = err
@@ -398,7 +398,7 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 		testResolved := []models.ConflictResolvedEntry{
 			{IP: "192.168.1.100", PrevMACs: []string{"AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02"}, PrevVendors: []string{"Vendor A", "Vendor B"}, CurrentMAC: "AA:BB:CC:DD:EE:01", CurrentVendor: "Vendor A", RemovedNewIPs: map[string]string{"AA:BB:CC:DD:EE:02": "192.168.1.150"}, Subnet: "192.168.1.0/24"},
 		}
-		subject := fmt.Sprintf("[Net Finder] IP Conflict Resolved — %s (%d)", "192.168.1.0/24", len(testResolved))
+		subject := fmt.Sprintf("[Net Finder] IP Conflict Resolved - %s (%d)", "192.168.1.0/24", len(testResolved))
 		body := buildConflictResolvedHTMLReport("192.168.1.0/24", testResolved)
 		if err := sendEmailHTML(cfg, subject, body); err != nil {
 			lastErr = err
@@ -413,7 +413,7 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 			{IP: "192.168.1.10", Hostname: "server.local", MAC: "11:22:33:44:55:66", Vendor: "Dell Inc.", Subnet: "192.168.1.0/24"},
 			{IP: "192.168.1.20", MAC: "FF:EE:DD:CC:BB:AA", Vendor: "HP Enterprise", Subnet: "192.168.1.0/24"},
 		}
-		subject := fmt.Sprintf("[Net Finder] Host Discovery — %s (%d hosts)", "192.168.1.0/24", len(testHosts))
+		subject := fmt.Sprintf("[Net Finder] Host Discovery - %s (%d hosts)", "192.168.1.0/24", len(testHosts))
 		body := buildHostHTMLReport("192.168.1.0/24", testHosts)
 		if err := sendEmailHTML(cfg, subject, body); err != nil {
 			lastErr = err
@@ -520,7 +520,7 @@ func (am *AlertManager) TestAlert(cfg models.AlertConfig) error {
 		testConflicts := []models.ConflictEntry{
 			{IP: "192.168.1.100", MACs: []string{"AA:BB:CC:DD:EE:01", "AA:BB:CC:DD:EE:02"}, Vendors: []string{"Vendor A", "Vendor B"}, Subnet: "192.168.1.0/24"},
 		}
-		subject := fmt.Sprintf("[Net Finder] IP Conflict — %s (%d)", "192.168.1.0/24", len(testConflicts))
+		subject := fmt.Sprintf("[Net Finder] IP Conflict - %s (%d)", "192.168.1.0/24", len(testConflicts))
 		body := buildHTMLReport("192.168.1.0/24", testConflicts)
 		return sendEmailHTML(cfg, subject, body)
 	}
@@ -825,7 +825,7 @@ func (am *AlertManager) SendHostAlerts(hosts []models.HostEntry) {
 			if !matchesSubnetStr(cfg, subnet) || !hasEventForSubnet(cfg, "hosts", subnet) {
 				continue
 			}
-			subject := fmt.Sprintf("[Net Finder] Host Discovery — %s (%d hosts)", subnet, len(entries))
+			subject := fmt.Sprintf("[Net Finder] Host Discovery - %s (%d hosts)", subnet, len(entries))
 			body := buildHostHTMLReport(subnet, entries)
 			if err := sendEmailHTML(cfg, subject, body); err != nil {
 				log.Printf("host alert send failed [%s] %s: %v", cfg.ID, subnet, err)
@@ -1081,7 +1081,7 @@ func buildSecuritySubject(arpAlerts []models.ARPSpoofAlert, dnsAlerts []models.D
 	if len(dnsAlerts) > 0 {
 		parts = append(parts, fmt.Sprintf("DNS Spoofing (%d)", len(dnsAlerts)))
 	}
-	return fmt.Sprintf("[Net Finder] Security Alert — %s", strings.Join(parts, ", "))
+	return fmt.Sprintf("[Net Finder] Security Alert - %s", strings.Join(parts, ", "))
 }
 
 func buildSecurityHTMLReport(arpAlerts []models.ARPSpoofAlert, dnsAlerts []models.DNSSpoofAlert) string {
