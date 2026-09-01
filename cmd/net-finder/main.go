@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"net-finder/internal/alert"
+	"net-finder/internal/hostname"
 	"net-finder/internal/models"
 	"net-finder/internal/netutil"
 	"net-finder/internal/protocol"
@@ -29,7 +30,8 @@ func main() {
 	ipModeStr := flag.String("mode", "both", "IP version: ipv4, ipv6, both")
 	arpRate := flag.Int("arp-rate", 10, "max ARP packets/sec (keep low to avoid Dynamic ARP Inspection)")
 	probeRate := flag.Int("probe-rate", 100, "max routed L3 liveness probes per sec")
-	portScanRate := flag.Int("portscan-rate", 500, "ceiling for the adaptive (latency-based) port-scan rate in conns/sec")
+	portScanRate := flag.Int("portscan-rate", 500, "ceiling for the adaptive connect-scan rate in conns/sec (fallback service scan)")
+	synRate := flag.Int("syn-rate", 20000, "SYN-scan send rate in packets/sec (full 1-65535 sweep)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Net Finder\n\n")
@@ -63,12 +65,16 @@ func main() {
 		portScanStart = *portScanRate
 	}
 	netutil.EnablePortScanAdaptive(50, *portScanRate, portScanStart)
+	netutil.SetSYNScanRate(*synRate)
 
 	// Get network interface
 	iface, err := netutil.GetInterfaceForMode(*ifaceName, mode)
 	if err != nil {
 		log.Fatalf("Failed to detect interface: %v", err)
 	}
+
+	// Link-local IPv6 targets can only be dialled with an interface zone.
+	hostname.SetScanZone(iface.Name)
 
 	var localIP net.IP
 	var localMAC net.HardwareAddr

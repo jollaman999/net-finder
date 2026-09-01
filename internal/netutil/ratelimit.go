@@ -35,10 +35,7 @@ func NewLimiter(perSec int) *Limiter {
 }
 
 func (l *Limiter) run(perSec int) {
-	interval := time.Second / time.Duration(perSec)
-	if interval <= 0 {
-		interval = time.Microsecond
-	}
+	interval, perTick := tickParams(perSec)
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -46,21 +43,35 @@ func (l *Limiter) run(perSec int) {
 		case <-l.stop:
 			return
 		case n := <-l.rateCh:
-			if n <= 0 {
-				n = 1
-			}
-			interval = time.Second / time.Duration(n)
-			if interval <= 0 {
-				interval = time.Microsecond
-			}
+			interval, perTick = tickParams(n)
 			t.Reset(interval)
 		case <-t.C:
-			select {
-			case l.tokens <- struct{}{}:
-			default:
+			for i := 0; i < perTick; i++ {
+				select {
+				case l.tokens <- struct{}{}:
+				default:
+				}
 			}
 		}
 	}
+}
+
+// tickParams picks a refill tick interval and the number of tokens to release per
+// tick for a target rate. Above ~1000/sec a per-token tick would be throttled by
+// timer resolution (~1ms), so it releases a batch of tokens on each 1ms tick.
+func tickParams(perSec int) (time.Duration, int) {
+	if perSec < 1 {
+		perSec = 1
+	}
+	interval := time.Second / time.Duration(perSec)
+	if interval < time.Millisecond {
+		perTick := perSec / 1000
+		if perTick < 1 {
+			perTick = 1
+		}
+		return time.Millisecond, perTick
+	}
+	return interval, 1
 }
 
 // SetRate changes the refill rate (operations/sec) of a running limiter in
@@ -112,6 +123,7 @@ var (
 	arpLimiter      *Limiter
 	probeLimiter    *Limiter
 	portScanLimiter *Limiter
+	synScanLimiter  *Limiter
 )
 
 // SetARPRate configures the global ARP send rate (packets/sec). Keep this low
@@ -149,6 +161,24 @@ func PortScanSetRate(perSec int) {
 	l := portScanLimiter
 	limiterMu.RUnlock()
 	l.SetRate(perSec)
+}
+
+// SetSYNScanRate configures the global SYN-scan send rate (packets/sec). This can
+// run much higher than the connect-scan rate because SYN scanning never blocks
+// waiting per port. n <= 0 disables (unlimited).
+func SetSYNScanRate(perSec int) {
+	limiterMu.Lock()
+	defer limiterMu.Unlock()
+	synScanLimiter.Stop()
+	synScanLimiter = NewLimiter(perSec)
+}
+
+// SYNScanAcquire blocks until the global SYN-scan limiter permits one send.
+func SYNScanAcquire() {
+	limiterMu.RLock()
+	l := synScanLimiter
+	limiterMu.RUnlock()
+	l.Acquire()
 }
 
 // ARPAcquire blocks until the global ARP limiter permits one send.

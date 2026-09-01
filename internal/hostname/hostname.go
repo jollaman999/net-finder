@@ -51,6 +51,26 @@ func init() {
 	}
 }
 
+// scanZone is the interface a link-local IPv6 address has to be qualified with
+// before the kernel will route a connection to it. Set once at startup.
+var scanZone string
+
+// SetScanZone records the scanning interface's name for link-local IPv6 dialling.
+func SetScanZone(iface string) { scanZone = iface }
+
+// dialTarget builds the address to dial for a scanned host. A link-local IPv6
+// address needs its interface appended ("fe80::1%eth0"); connecting without one
+// fails with EINVAL, so the SYN scan would find open ports that nothing could
+// then probe for a service.
+func dialTarget(ip, port string) string {
+	if scanZone != "" && !strings.Contains(ip, "%") {
+		if parsed := net.ParseIP(ip); parsed != nil && parsed.To4() == nil && parsed.IsLinkLocalUnicast() {
+			return net.JoinHostPort(ip+"%"+scanZone, port)
+		}
+	}
+	return net.JoinHostPort(ip, port)
+}
+
 // ResolveHostnames resolves hostnames for a list of IPs using multiple methods:
 // 1. DNS PTR (reverse DNS)
 // 2. NetBIOS Name Service (UDP 137) - Windows/Samba hosts
@@ -121,9 +141,14 @@ func ResolveHostnames(ips []string) []models.HostnameEntry {
 	return results
 }
 
-// ResolveNotesStream scans all TCP ports on each IP, probes HTTP on open ports,
-// and calls onResult incrementally as results are found.
-// Hosts are processed one at a time to avoid semaphore contention.
+// ResolveNotesStream scans TCP ports on each IP and probes open ports for
+// HTTP/HTTPS and database services, calling onResult incrementally.
+//
+// Scanning runs in two rounds across the whole host set rather than fully
+// finishing one host before the next: first the curated topPorts on every host
+// (so common services surface quickly for all hosts), then the second-pass ports
+// on every host. This stops late hosts from waiting hours behind the slower sweep
+// of earlier ones. All connections share the global port-scan rate limiter.
 func ResolveNotesStream(ips []string, stopCh <-chan struct{}, onResult func(ip, note string), onHostDone func()) {
 	if len(ips) == 0 {
 		return
@@ -132,18 +157,38 @@ func ResolveNotesStream(ips []string, stopCh <-chan struct{}, onResult func(ip, 
 	const maxConns = 1000
 	sem := make(chan struct{}, maxConns)
 
+	svc := make(map[string]*hostServices, len(ips))
 	for _, ip := range ips {
+		svc[ip] = &hostServices{probed: make(map[int]bool)}
+	}
+
+	stopped := func() bool {
 		select {
 		case <-stopCh:
-			return
+			return true
 		default:
+			return false
 		}
-		note := resolveHTTP(ip, sem, stopCh, func(partial string) {
-			if partial != "" {
-				onResult(ip, partial)
-			}
-		})
-		if note != "" {
+	}
+
+	// Round 1: common ports on every host - fast, surfaces services for all.
+	for _, ip := range ips {
+		if stopped() {
+			return
+		}
+		scanAndProbe(ip, topPorts, svc[ip], sem, stopCh)
+		if note := svc[ip].note(); note != "" {
+			onResult(ip, note)
+		}
+	}
+
+	// Round 2: the remaining ports on every host.
+	for _, ip := range ips {
+		if stopped() {
+			return
+		}
+		scanAndProbe(ip, remainingPorts, svc[ip], sem, stopCh)
+		if note := svc[ip].note(); note != "" {
 			onResult(ip, note)
 		}
 		if onHostDone != nil {
@@ -256,7 +301,7 @@ func resolveMDNS(ip string) string {
 	query := buildDNSQuery(0x0000, arpaName, 12, true) // PTR=12, unicast=true
 
 	// Send unicast query directly to the target host on port 5353
-	conn, err := net.DialTimeout("udp", net.JoinHostPort(ip, "5353"), 500*time.Millisecond)
+	conn, err := net.DialTimeout("udp", dialTarget(ip, "5353"), 500*time.Millisecond)
 	if err != nil {
 		return ""
 	}
@@ -396,7 +441,7 @@ func readDNSName(data []byte, pos int) string {
 
 // resolveTLS connects to port 443 and extracts hostname from TLS certificate CN/SAN
 func resolveTLS(ip string) string {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, "443"), 500*time.Millisecond)
+	conn, err := net.DialTimeout("tcp", dialTarget(ip, "443"), 500*time.Millisecond)
 	if err != nil {
 		return ""
 	}
@@ -437,7 +482,7 @@ func resolveTLS(ip string) string {
 
 // resolveSMTP connects to port 25 and extracts hostname from SMTP banner
 func resolveSMTP(ip string) string {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, "25"), 500*time.Millisecond)
+	conn, err := net.DialTimeout("tcp", dialTarget(ip, "25"), 500*time.Millisecond)
 	if err != nil {
 		return ""
 	}
@@ -477,60 +522,78 @@ func resolveSMTP(ip string) string {
 	return hostname
 }
 
-// resolveHTTP scans a host's TCP ports and probes open ports for HTTP(S) and
-// database services. Scanning is two-phase: the curated topPorts are scanned
-// first and, if they yield any services, onPartial is called with an early note;
-// the remaining ports are then swept and the full note is returned. onPartial may
-// be nil. The returned string is the complete note (empty if nothing was found).
-func resolveHTTP(ip string, sem chan struct{}, stopCh <-chan struct{}, onPartial func(string)) string {
-	var httpResults, httpsResults []webProbeResult
-	var dbResults []dbProbeResult
-	probed := make(map[int]bool)
+// hostServices accumulates detected services for one host across scan passes.
+type hostServices struct {
+	http, https []webProbeResult
+	db          []dbProbeResult
+	probed      map[int]bool
+}
 
-	// probeOpen classifies each newly-open port as HTTP, HTTPS, or a database
-	// service, accumulating into the shared result slices.
-	probeOpen := func(openPorts []int) {
-		for _, p := range openPorts {
-			select {
-			case <-stopCh:
-				return
-			default:
+func (hs *hostServices) note() string {
+	return buildServiceNote(hs.http, hs.https, hs.db)
+}
+
+// ProbeServices identifies HTTP/HTTPS and database services on a host's already
+// discovered open ports (e.g. from a SYN scan) and returns the formatted note,
+// or "" if none are found. No port scanning is done here - only service probing.
+func ProbeServices(ip string, openPorts []int, stopCh <-chan struct{}) string {
+	if len(openPorts) == 0 {
+		return ""
+	}
+	hs := &hostServices{probed: make(map[int]bool)}
+	sort.Ints(openPorts)
+	for _, p := range openPorts {
+		select {
+		case <-stopCh:
+			return hs.note()
+		default:
+		}
+		if hs.probed[p] {
+			continue
+		}
+		hs.probed[p] = true
+		ps := strconv.Itoa(p)
+		if r := tryHTTP(ip, ps); r != nil {
+			if r.isTLS {
+				hs.https = append(hs.https, *r)
+			} else {
+				hs.http = append(hs.http, *r)
 			}
-			if probed[p] {
-				continue
-			}
-			probed[p] = true
-			ps := strconv.Itoa(p)
-			if r := tryHTTP(ip, ps); r != nil {
-				if r.isTLS {
-					httpsResults = append(httpsResults, *r)
-				} else {
-					httpResults = append(httpResults, *r)
-				}
-				continue
-			}
-			if d := tryDB(ip, ps); d != nil {
-				dbResults = append(dbResults, *d)
-			}
+			continue
+		}
+		if d := tryDB(ip, ps); d != nil {
+			hs.db = append(hs.db, *d)
 		}
 	}
+	return hs.note()
+}
 
-	// Phase 1: curated top ports — fast, surfaces common services immediately.
-	probeOpen(scanPorts(ip, topPorts, sem, stopCh))
-	note := buildServiceNote(httpResults, httpsResults, dbResults)
-	if note != "" && onPartial != nil {
-		onPartial(note)
+// scanAndProbe scans the given ports on ip and classifies each newly-open port as
+// HTTP, HTTPS, or a database service, merging the results into hs.
+func scanAndProbe(ip string, ports []int, hs *hostServices, sem chan struct{}, stopCh <-chan struct{}) {
+	for _, p := range scanPorts(ip, ports, sem, stopCh) {
+		select {
+		case <-stopCh:
+			return
+		default:
+		}
+		if hs.probed[p] {
+			continue
+		}
+		hs.probed[p] = true
+		ps := strconv.Itoa(p)
+		if r := tryHTTP(ip, ps); r != nil {
+			if r.isTLS {
+				hs.https = append(hs.https, *r)
+			} else {
+				hs.http = append(hs.http, *r)
+			}
+			continue
+		}
+		if d := tryDB(ip, ps); d != nil {
+			hs.db = append(hs.db, *d)
+		}
 	}
-
-	select {
-	case <-stopCh:
-		return note
-	default:
-	}
-
-	// Phase 2: everything else — catches services on non-standard ports.
-	probeOpen(scanPorts(ip, remainingPorts, sem, stopCh))
-	return buildServiceNote(httpResults, httpsResults, dbResults)
 }
 
 // scanPorts TCP-connect scans the given ports on an IP and returns the open ones,
@@ -554,7 +617,7 @@ func scanPorts(ip string, ports []int, sem chan struct{}, stopCh <-chan struct{}
 				defer func() { <-sem; scanWg.Done() }()
 				netutil.PortScanAcquire()
 				start := time.Now()
-				conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, strconv.Itoa(p)), 200*time.Millisecond)
+				conn, err := net.DialTimeout("tcp", dialTarget(ip, strconv.Itoa(p)), 200*time.Millisecond)
 				elapsed := time.Since(start)
 				if err == nil {
 					conn.Close()
@@ -691,7 +754,7 @@ func tryDB(ip, port string) *dbProbeResult {
 // probeMySQLBanner reads the MySQL/MariaDB initial handshake (sent by the server
 // immediately on connect) and extracts the server version.
 func probeMySQLBanner(ip, port string) string {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+	conn, err := net.DialTimeout("tcp", dialTarget(ip, port), 1*time.Second)
 	if err != nil {
 		return ""
 	}
@@ -723,7 +786,7 @@ func probeMySQLBanner(ip, port string) string {
 
 // probePostgres sends an SSLRequest; PostgreSQL replies with a single 'S'/'N'.
 func probePostgres(ip, port string) string {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+	conn, err := net.DialTimeout("tcp", dialTarget(ip, port), 1*time.Second)
 	if err != nil {
 		return ""
 	}
@@ -749,7 +812,7 @@ func probePostgres(ip, port string) string {
 // probeRedis sends PING; Redis replies +PONG or a -NOAUTH/-DENIED error. When
 // unauthenticated it additionally fetches the version via INFO.
 func probeRedis(ip, port string) string {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+	conn, err := net.DialTimeout("tcp", dialTarget(ip, port), 1*time.Second)
 	if err != nil {
 		return ""
 	}
@@ -787,7 +850,7 @@ func probeRedis(ip, port string) string {
 
 // probeMemcached sends "version"; memcached replies "VERSION x.y.z".
 func probeMemcached(ip, port string) string {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+	conn, err := net.DialTimeout("tcp", dialTarget(ip, port), 1*time.Second)
 	if err != nil {
 		return ""
 	}
@@ -811,7 +874,7 @@ func probeMemcached(ip, port string) string {
 // probeMongoDB sends a legacy OP_QUERY {isMaster:1}; MongoDB replies with an
 // OP_REPLY whose BSON body contains isMaster/maxWireVersion markers.
 func probeMongoDB(ip, port string) string {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+	conn, err := net.DialTimeout("tcp", dialTarget(ip, port), 1*time.Second)
 	if err != nil {
 		return ""
 	}
@@ -860,7 +923,7 @@ func probeMongoDB(ip, port string) string {
 // probeMSSQL sends a TDS Pre-Login packet; SQL Server replies with a TDS
 // response (type 0x04) whose VERSION option carries the server version.
 func probeMSSQL(ip, port string) string {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+	conn, err := net.DialTimeout("tcp", dialTarget(ip, port), 1*time.Second)
 	if err != nil {
 		return ""
 	}
@@ -918,7 +981,7 @@ func parseTDSVersion(p []byte) string {
 // packet (Accept/Refuse/Redirect/Resend). The Refuse/data payload often carries
 // the version (VSNNUM), which is decoded when present.
 func probeOracle(ip, port string) string {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+	conn, err := net.DialTimeout("tcp", dialTarget(ip, port), 1*time.Second)
 	if err != nil {
 		return ""
 	}
@@ -1002,7 +1065,7 @@ func isPrintableASCII(s string) bool {
 
 // tryHTTP attempts an HTTP(S) request on a port, follows redirects, and returns title + TLS status.
 func tryHTTP(ip, port string) *webProbeResult {
-	conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+	conn, err := net.DialTimeout("tcp", dialTarget(ip, port), 1*time.Second)
 	if err != nil {
 		return nil
 	}
@@ -1016,7 +1079,7 @@ func tryHTTP(ip, port string) *webProbeResult {
 		conn = tlsConn
 	} else {
 		tlsConn.Close()
-		conn, err = net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+		conn, err = net.DialTimeout("tcp", dialTarget(ip, port), 1*time.Second)
 		if err != nil {
 			return nil
 		}
@@ -1070,7 +1133,7 @@ func tryHTTP(ip, port string) *webProbeResult {
 			path = newPath
 
 			// Reconnect for next request
-			c, err := net.DialTimeout("tcp", net.JoinHostPort(ip, port), 1*time.Second)
+			c, err := net.DialTimeout("tcp", dialTarget(ip, port), 1*time.Second)
 			if err != nil {
 				return nil
 			}

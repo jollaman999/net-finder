@@ -12,6 +12,7 @@ const (
 	offIP6NextHdr = 20 // IPv6 Next Header field (14 + 6)
 	offIP6UDPSrc  = 54 // UDP src port over IPv6 (14 + 40 + 0)
 	offIP6UDPDst  = 56 // UDP dst port over IPv6 (14 + 40 + 2)
+	offIP6TCPDst  = 56 // TCP dst port over IPv6 (14 + 40 + 2)
 )
 
 // BPFFilterARP returns a BPF program that matches ARP frames (EtherType 0x0806).
@@ -49,6 +50,44 @@ func BPFFilterDHCP() []bpf.RawInstruction {
 		// Accept
 		bpf.RetConstant{Val: 65536},
 		// Reject
+		bpf.RetConstant{Val: 0},
+	})
+	return instrs
+}
+
+// BPFFilterTCPToPort returns a BPF program matching IPv4 TCP segments whose
+// destination port equals port. Used by the SYN scanner to capture only the
+// SYN-ACK/RST responses addressed to its own source port.
+// EtherType==0x0800 && IP proto==6 (TCP) && TCP dstPort==port
+func BPFFilterTCPToPort(port uint16) []bpf.RawInstruction {
+	instrs, _ := bpf.Assemble([]bpf.Instruction{
+		bpf.LoadAbsolute{Off: offEtherType, Size: 2},
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x0800, SkipTrue: 0, SkipFalse: 6},
+		bpf.LoadAbsolute{Off: offIPProto, Size: 1},
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 6, SkipTrue: 0, SkipFalse: 4}, // TCP
+		bpf.LoadMemShift{Off: 14},           // X = IP header length
+		bpf.LoadIndirect{Off: 16, Size: 2},  // TCP dst port (14 + IHL + 2)
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: uint32(port), SkipTrue: 0, SkipFalse: 1},
+		bpf.RetConstant{Val: 65536},
+		bpf.RetConstant{Val: 0},
+	})
+	return instrs
+}
+
+// BPFFilterTCP6ToPort returns a BPF program matching IPv6 TCP segments whose
+// destination port equals port, the IPv6 counterpart of BPFFilterTCPToPort. The
+// IPv6 header is a fixed 40 bytes, so the TCP offset is constant; SYN-ACK and RST
+// responses carry no extension headers in practice.
+// EtherType==0x86DD && NextHdr==6 (TCP) && TCP dstPort==port
+func BPFFilterTCP6ToPort(port uint16) []bpf.RawInstruction {
+	instrs, _ := bpf.Assemble([]bpf.Instruction{
+		bpf.LoadAbsolute{Off: offEtherType, Size: 2},
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x86DD, SkipTrue: 0, SkipFalse: 5},
+		bpf.LoadAbsolute{Off: offIP6NextHdr, Size: 1},
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: 6, SkipTrue: 0, SkipFalse: 3}, // TCP
+		bpf.LoadAbsolute{Off: offIP6TCPDst, Size: 2},
+		bpf.JumpIf{Cond: bpf.JumpEqual, Val: uint32(port), SkipTrue: 0, SkipFalse: 1},
+		bpf.RetConstant{Val: 65536},
 		bpf.RetConstant{Val: 0},
 	})
 	return instrs

@@ -922,15 +922,91 @@ func (s *Scanner) backgroundResolveNotes() {
 		s.noteScanMu.Unlock()
 	}
 
-	// Phase 1: Scan IPv4 hosts
-	hostname.ResolveNotesStream(v4ips, s.bgStopCh, setNote, incDone)
+	bgStopped := func() bool {
+		select {
+		case <-s.bgStopCh:
+			return true
+		default:
+			return false
+		}
+	}
 
-	// Phase 2: Scan IPv6 hosts independently
-	hostname.ResolveNotesStream(v6ips, s.bgStopCh, setNote, incDone)
+	// Phase 1: IPv4 hosts. A fast SYN scan finds open ports across all hosts at
+	// once (no per-port connect timeout), then each host's open ports are probed
+	// for HTTP/HTTPS/DB services. Falls back to connect scanning when the
+	// interface has no IPv4 address.
+	if len(v4ips) > 0 && s.localIP != nil {
+		ports := allTCPPorts()
+		// Scan in batches so notes and progress appear periodically rather than
+		// only after the whole host set finishes.
+		const batchSize = 128
+		for start := 0; start < len(v4ips) && !bgStopped(); start += batchSize {
+			end := min(start+batchSize, len(v4ips))
+			batch := v4ips[start:end]
+			var targets []net.IP
+			for _, ipStr := range batch {
+				if ip := net.ParseIP(ipStr); ip != nil {
+					targets = append(targets, ip)
+				}
+			}
+			openMap := protocol.SYNScanIPv4(s.iface, s.localIP, targets, ports, 3*time.Second, s.bgStopCh)
+			for _, ipStr := range batch {
+				if bgStopped() {
+					break
+				}
+				if note := hostname.ProbeServices(ipStr, openMap[ipStr], s.bgStopCh); note != "" {
+					setNote(ipStr, note)
+				}
+				incDone()
+			}
+		}
+	} else if len(v4ips) > 0 {
+		hostname.ResolveNotesStream(v4ips, s.bgStopCh, setNote, incDone)
+	}
+
+	// Phase 2: IPv6 hosts, same two steps as IPv4. Link-local targets are probed
+	// from our link-local address and global ones from the global address, so the
+	// scan runs whenever the interface has either. Falls back to connect scanning
+	// when it has neither.
+	if len(v6ips) > 0 && (s.localIPv6 != nil || s.linkLocalIPv6 != nil) {
+		ports := allTCPPorts()
+		const batchSize = 128
+		for start := 0; start < len(v6ips) && !bgStopped(); start += batchSize {
+			end := min(start+batchSize, len(v6ips))
+			batch := v6ips[start:end]
+			var targets []net.IP
+			for _, ipStr := range batch {
+				if ip := net.ParseIP(ipStr); ip != nil {
+					targets = append(targets, ip)
+				}
+			}
+			openMap := protocol.SYNScanIPv6(s.iface, s.localIPv6, s.linkLocalIPv6, targets, ports, 3*time.Second, s.bgStopCh)
+			for _, ipStr := range batch {
+				if bgStopped() {
+					break
+				}
+				if note := hostname.ProbeServices(ipStr, openMap[ipStr], s.bgStopCh); note != "" {
+					setNote(ipStr, note)
+				}
+				incDone()
+			}
+		}
+	} else if len(v6ips) > 0 {
+		hostname.ResolveNotesStream(v6ips, s.bgStopCh, setNote, incDone)
+	}
 
 	s.noteScanMu.Lock()
 	s.noteScanRunning = false
 	s.noteScanMu.Unlock()
+}
+
+// allTCPPorts returns the full 1-65535 TCP port list for a SYN scan.
+func allTCPPorts() []int {
+	ports := make([]int, 65535)
+	for i := range ports {
+		ports[i] = i + 1
+	}
+	return ports
 }
 
 // arpForHostnames does a quick ARP scan to get IPv4→MAC mappings for hostname resolution.
