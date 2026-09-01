@@ -119,7 +119,7 @@ func randomMAC(ouiPool [][3]byte) net.HardwareAddr {
 }
 
 // HarvestRemoteMACs discovers real MACs for hosts in L2-reachable "remote"
-// subnets — secondary IP ranges that live on the same broadcast domain as us but
+// subnets - secondary IP ranges that live on the same broadcast domain as us but
 // outside our own subnet (Case A). For each such subnet it presents a synthetic
 // identity (random MAC + free in-subnet source IP) and ARP-scans the range from
 // it, so each subnet appears as its own distinct host instead of one host
@@ -170,7 +170,7 @@ func HarvestRemoteMACs(iface *net.Interface, subnets []*net.IPNet, localIP net.I
 		if srcIP == nil {
 			srcIP = pickFreeIP(sock, iface, mac, sn, result, timeout)
 			if srcIP == nil {
-				// No free source IP found — skip harvesting this subnet rather
+				// No free source IP found - skip harvesting this subnet rather
 				// than risk claiming an in-use address.
 				continue
 			}

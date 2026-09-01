@@ -122,7 +122,7 @@ func ARPScan(iface *net.Interface, localIP net.IP, localMAC net.HardwareAddr, su
 	time.Sleep(100 * time.Millisecond)
 
 	// ARP is L2-local: only scan subnets we are directly attached to, and always
-	// use our real source IP. Never synthesize a foreign in-subnet source — that
+	// use our real source IP. Never synthesize a foreign in-subnet source - that
 	// is indistinguishable from ARP spoofing and trips Dynamic ARP Inspection.
 	// Remote subnets are handled separately via routed L3 probes.
 	var targets []net.IP
@@ -394,7 +394,7 @@ func icmpFallbackScan(iface *net.Interface, localIP net.IP, localMAC net.Hardwar
 		return
 	}
 	defer sock.Close()
-	// No BPF filter — capture all traffic in promiscuous mode
+	// No BPF filter - capture all traffic in promiscuous mode
 
 	missingSet := make(map[string]bool)
 	for _, ip := range missing {

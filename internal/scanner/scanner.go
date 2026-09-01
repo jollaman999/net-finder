@@ -770,7 +770,7 @@ func (s *Scanner) processDHCPResults(servers []models.DHCPServerInfo) {
 }
 
 // resolveHostnames resolves DNS PTR for all discovered hosts.
-// Safe to call concurrently from multiple goroutines — only resolves
+// Safe to call concurrently from multiple goroutines - only resolves
 // IPs not yet in hostnameMap and merges results.
 // Also shares hostnames across IPv4/IPv6 hosts with the same MAC.
 func (s *Scanner) resolveHostnames() {
@@ -1219,7 +1219,7 @@ func (s *Scanner) ingestObserved(observed map[string]string, baseline map[string
 
 // sweepSubnets discovers hosts in newly-learned subnets and merges them into the
 // host list additively. Attached subnets use ARP; remote (routed) subnets use
-// L3 probes — never spoofed cross-subnet ARP.
+// L3 probes - never spoofed cross-subnet ARP.
 func (s *Scanner) sweepSubnets(subnets []*net.IPNet) {
 	if s.localIP == nil || len(subnets) == 0 {
 		return
@@ -1633,8 +1633,8 @@ func (s *Scanner) addConflicts(conflicts []models.ConflictEntry) []models.Confli
 //     SDN/overlay ARP responder.
 //   - all_laa:    every MAC is locally-administered → virtual NICs (VM/bond).
 //
-// A genuine accidental collision — two unrelated global-vendor MACs, appearing on
-// a single IP with no repeated pattern — keeps kind "conflict".
+// A genuine accidental collision - two unrelated global-vendor MACs, appearing on
+// a single IP with no repeated pattern - keeps kind "conflict".
 func classifyConflicts(conflicts []models.ConflictEntry) {
 	if len(conflicts) == 0 {
 		return

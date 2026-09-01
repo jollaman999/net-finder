@@ -41,7 +41,7 @@ var (
 
 // EnablePortScanAdaptive turns on adaptive port-scan rate control within
 // [floor, ceil] conns/sec, starting at `start`. It (re)creates the shared
-// port-scan limiter at ceil — so the burst allowance is sized for the ceiling —
+// port-scan limiter at ceil - so the burst allowance is sized for the ceiling -
 // then dials it down to the starting rate.
 func EnablePortScanAdaptive(floor, ceil, start int) {
 	if floor < 1 {

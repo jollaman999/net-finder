@@ -79,8 +79,8 @@ func dialTarget(ip, port string) string {
 // 5. SMTP Banner (TCP 25) - mail servers
 //
 // Network infrastructure (switches/routers/APs) is named from LLDP SysName /
-// CDP DeviceID collected passively by the scanner — see scanner.resolveHostnames
-// — which replaces the old, noisy SNMP "public" probing.
+// CDP DeviceID collected passively by the scanner - see scanner.resolveHostnames
+// - which replaces the old, noisy SNMP "public" probing.
 func ResolveHostnames(ips []string) []models.HostnameEntry {
 	if len(ips) == 0 {
 		return nil
@@ -626,7 +626,7 @@ func scanPorts(ip string, ports []int, sem chan struct{}, stopCh <-chan struct{}
 					return
 				}
 				// A refusal means the host answered (fast RTT signal); a timeout
-				// means no response (usually a filtered port) — not a delay signal.
+				// means no response (usually a filtered port) - not a delay signal.
 				netutil.PortScanObserve(elapsed, strings.Contains(err.Error(), "refused"))
 			}(port)
 		}
@@ -1151,7 +1151,7 @@ func tryHTTP(ip, port string) *webProbeResult {
 			continue
 		}
 
-		// Not a redirect — try to identify the service
+		// Not a redirect - try to identify the service
 		if name := identifyService(body, ip); name != "" {
 			return &webProbeResult{port: port, title: name, isTLS: isTLS}
 		}
@@ -1226,7 +1226,7 @@ func identifyService(response, ip string) string {
 		headers = response
 	}
 
-	// 1. HTML <title> — try on any status code
+	// 1. HTML <title> - try on any status code
 	if title := extractTitle(body, ip); title != "" {
 		return title
 	}

@@ -21,7 +21,7 @@ import (
 var l3ProbePorts = []int{445, 139, 135, 3389, 22, 80, 443, 3306, 5432, 1433, 1521, 6379, 27017, 8080, 23}
 
 // L3ProbeScan discovers live hosts in routed (non-attached) subnets using
-// normal L3 traffic from our real source IP — TCP connects plus a best-effort
+// normal L3 traffic from our real source IP - TCP connects plus a best-effort
 // ICMP echo sweep. It never forges a source address, so it is indistinguishable
 // from ordinary client traffic and does not trip DAI/port-security. All sends
 // are globally rate-limited. Returns the set of alive IPs (MAC is unknowable
