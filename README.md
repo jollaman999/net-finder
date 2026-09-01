@@ -2,30 +2,30 @@
 
 [한국어 문서](docs/README.ko.md)
 
-A real-time network scanner and monitoring dashboard with a built-in web UI. Net Finder discovers hosts on your local network using both IPv4 and IPv6, detects network infrastructure, and monitors for security threats — all from a single static binary.
+A real-time network scanner and monitoring dashboard with a built-in web UI. Net Finder discovers hosts on your local network using both IPv4 and IPv6, detects network infrastructure, and monitors for security threats - all from a single static binary.
 
 ## Features
 
-- **IPv4 & IPv6 dual-stack support** — Scan IPv4-only, IPv6-only, or both simultaneously with the `-mode` flag
-- **ARP-based host discovery** — Scans directly-attached subnets using ARP requests and passively captures ARP traffic to discover all active IPv4 hosts
-- **NDP-based host discovery** — Discovers IPv6 hosts via Neighbor Discovery Protocol multicast solicitations
-- **Cross-subnet discovery** — For subnets outside the interface's own range, real MACs are harvested from L2-reachable secondary subnets (same broadcast domain) using a stable per-subnet synthetic identity — a genuine-vendor-OUI MAC plus a free in-subnet source IP found via RFC 5227 probes. Truly routed subnets are discovered via ordinary L3 traffic (TCP connects + ICMP echo) from the real source IP, never source-spoofed
-- **IP conflict detection** — Identifies multiple MAC addresses claiming the same IP (both IPv4 and IPv6) and classifies them: genuine collisions are flagged, while systematic VIP / NIC-bond / SDN patterns (a MAC shared across IPs, a repeated vendor pair, OpenStack overlays, all-local MACs) are labelled *likely VIP/bond* and kept out of the alert stream
-- **DHCP/DHCPv6 server detection** — Discovers DHCP and DHCPv6 servers on the network and reports offered IPs, subnet masks, routers, and DNS servers
-- **Hostname resolution** — Resolves hostnames via DNS PTR, NetBIOS, mDNS, TLS certificates, SMTP banners, and passive LLDP/CDP cross-reference. In IPv6-only mode, uses internal ARP to share hostnames via MAC address matching
+- **IPv4 & IPv6 dual-stack support** - Scan IPv4-only, IPv6-only, or both simultaneously with the `-mode` flag
+- **ARP-based host discovery** - Scans directly-attached subnets using ARP requests and passively captures ARP traffic to discover all active IPv4 hosts
+- **NDP-based host discovery** - Discovers IPv6 hosts via Neighbor Discovery Protocol multicast solicitations
+- **Cross-subnet discovery** - For subnets outside the interface's own range, real MACs are harvested from L2-reachable secondary subnets (same broadcast domain) using a stable per-subnet synthetic identity - a genuine-vendor-OUI MAC plus a free in-subnet source IP found via RFC 5227 probes. Truly routed subnets are discovered via ordinary L3 traffic (TCP connects + ICMP echo) from the real source IP, never source-spoofed
+- **IP conflict detection** - Identifies multiple MAC addresses claiming the same IP (both IPv4 and IPv6) and classifies them: genuine collisions are flagged, while systematic VIP / NIC-bond / SDN patterns (a MAC shared across IPs, a repeated vendor pair, OpenStack overlays, all-local MACs) are labelled *likely VIP/bond* and kept out of the alert stream
+- **DHCP/DHCPv6 server detection** - Discovers DHCP and DHCPv6 servers on the network and reports offered IPs, subnet masks, routers, and DNS servers
+- **Hostname resolution** - Resolves hostnames via DNS PTR, NetBIOS, mDNS, TLS certificates, SMTP banners, and passive LLDP/CDP cross-reference. In IPv6-only mode, uses internal ARP to share hostnames via MAC address matching
 - **Service detection** - After the initial scan, a background SYN scan sweeps all 65535 TCP ports on every host, over IPv4 and IPv6 alike, sending from a raw socket and reading the replies off AF_PACKET so no port costs a connection timeout. Open ports are probed for HTTP/HTTPS (identified via HTML titles, `X-*-Version`/`Server` headers, JSON API responses, following redirects up to 3 hops) and for common databases (MySQL/MariaDB, PostgreSQL, Redis, MongoDB, Memcached, MSSQL, Oracle). Results are displayed incrementally with real-time progress tracking
-- **OUI vendor lookup** — Maps MAC addresses to hardware vendors using the IEEE OUI database
+- **OUI vendor lookup** - Maps MAC addresses to hardware vendors using the IEEE OUI database
 - **Network protocol listeners**
-  - **HSRP** (Hot Standby Router Protocol) — Detects Cisco HSRP v1/v2 advertisements
-  - **VRRP** (Virtual Router Redundancy Protocol) — Captures VRRP advertisements
-  - **LLDP** (Link Layer Discovery Protocol) — Discovers neighboring switches and network devices
-  - **CDP** (Cisco Discovery Protocol) — Discovers Cisco devices and their details
+  - **HSRP** (Hot Standby Router Protocol) - Detects Cisco HSRP v1/v2 advertisements
+  - **VRRP** (Virtual Router Redundancy Protocol) - Captures VRRP advertisements
+  - **LLDP** (Link Layer Discovery Protocol) - Discovers neighboring switches and network devices
+  - **CDP** (Cisco Discovery Protocol) - Discovers Cisco devices and their details
 - **Security monitoring**
-  - **ARP spoofing detection** — Continuously monitors ARP traffic against a baseline, with critical alerts for gateway spoofing
-  - **NDP spoofing detection** — Monitors IPv6 NDP traffic for suspicious neighbor advertisements
-  - **DNS spoofing detection** — Compares responses from multiple DNS servers to detect mismatches and suspiciously fast responses
-- **Email alerts** — Configurable per-subnet email alerts with separate IPv4/IPv6 event selection, encrypted config storage (AES-256-GCM)
-- **Web dashboard** — Single-page web UI with real-time scan progress, host lists, conflict alerts, protocol information, and multi-language support (English, Korean, Japanese, Chinese)
+  - **ARP spoofing detection** - Continuously monitors ARP traffic against a baseline, with critical alerts for gateway spoofing
+  - **NDP spoofing detection** - Monitors IPv6 NDP traffic for suspicious neighbor advertisements
+  - **DNS spoofing detection** - Compares responses from multiple DNS servers to detect mismatches and suspiciously fast responses
+- **Email alerts** - Configurable per-subnet email alerts with separate IPv4/IPv6 event selection, encrypted config storage (AES-256-GCM)
+- **Web dashboard** - Single-page web UI with real-time scan progress, host lists, conflict alerts, protocol information, and multi-language support (English, Korean, Japanese, Chinese)
 
 ## Requirements
 
@@ -130,12 +130,12 @@ The web dashboard opens automatically at `http://localhost:9090` (or your chosen
 
 ## How It Works
 
-1. **OUI database load** — Downloads and caches the IEEE OUI vendor database
-2. **Parallel scanning** — Runs all discovery phases concurrently (based on `-mode`):
+1. **OUI database load** - Downloads and caches the IEEE OUI vendor database
+2. **Parallel scanning** - Runs all discovery phases concurrently (based on `-mode`):
    - ARP scan across attached IPv4 subnets, MAC harvest / L3 probes across remote subnets, and/or NDP scan across IPv6 subnets, followed by hostname resolution
    - DHCP/DHCPv6 server detection, followed by DNS spoofing checks
    - Protocol listeners for HSRP, VRRP, LLDP, and CDP (30-second capture windows)
-3. **Background monitoring** — After the initial scan completes, continuously listens for:
+3. **Background monitoring** - After the initial scan completes, continuously listens for:
    - New HSRP/VRRP/LLDP/CDP advertisements
    - ARP traffic anomalies indicating potential spoofing (IPv4)
    - NDP traffic anomalies indicating potential spoofing (IPv6)
