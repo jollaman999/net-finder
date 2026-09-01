@@ -145,7 +145,7 @@ func SetProbeRate(perSec int) {
 }
 
 // SetPortScanRate configures the global rate for the full TCP port-scan sweep
-// (packets/sec). Kept lower than the general probe rate because a 1–65535 sweep
+// (packets/sec). Kept lower than the general probe rate because a 1-65535 sweep
 // against a single host is a classic port-scan signature. n <= 0 disables.
 func SetPortScanRate(perSec int) {
 	limiterMu.Lock()

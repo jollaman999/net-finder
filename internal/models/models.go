@@ -71,7 +71,7 @@ type ConflictResolvedEntry struct {
 	PrevVendors   []string          `json:"prevVendors"`
 	CurrentMAC    string            `json:"currentMAC"`
 	CurrentVendor string            `json:"currentVendor"`
-	RemovedNewIPs map[string]string `json:"removedNewIPs"` // removed MAC → new IP (empty if offline)
+	RemovedNewIPs map[string]string `json:"removedNewIPs"` // removed MAC -> new IP (empty if offline)
 	Subnet        string            `json:"subnet"`
 }
 

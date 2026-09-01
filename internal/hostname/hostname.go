@@ -327,7 +327,7 @@ func resolveMDNS(ip string) string {
 	return ""
 }
 
-// ── DNS helpers ──
+// -- DNS helpers --
 
 func buildDNSQuery(txID uint16, name string, qtype uint16, unicast bool) []byte {
 	var pkt []byte

@@ -874,7 +874,7 @@ tr.subnet-header:hover { background: var(--primary-light); }
 </div>
 
 <script>
-// ── i18n ──
+// -- i18n --
 const i18n = {
   en: {
     title: 'Net Finder',
@@ -1475,7 +1475,7 @@ function initLanguage() {
   applyLanguage();
 }
 
-// ── State ──
+// -- State --
 let currentTab = 'hosts';
 let pollTimer = null;
 let displayMode = 'ipv4';
@@ -1484,10 +1484,10 @@ let displayMode = 'ipv4';
 let rawHosts = [];
 let rawConflicts = [];
 
-// MAC→IP lookup (built from rawHosts each poll)
+// MAC->IP lookup (built from rawHosts each poll)
 let macToIP = {};
 
-// IP→conflict lookup (built from rawConflicts each poll)
+// IP->conflict lookup (built from rawConflicts each poll)
 let conflictMap = {};
 
 // Previous render HTML per element for skip-render optimization
@@ -1520,7 +1520,7 @@ const activeSort = {};
 // Search filter per table
 const activeFilter = {};
 
-// ── Theme ──
+// -- Theme --
 function initTheme() {
   const saved = localStorage.getItem('theme');
   if (saved === 'dark') {
@@ -1539,7 +1539,7 @@ function toggleTheme() {
   }
 }
 
-// ── Tabs ──
+// -- Tabs --
 function switchTab(tab) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -1548,7 +1548,7 @@ function switchTab(tab) {
   document.getElementById('panel-' + tab).classList.add('active');
 }
 
-// ── Scan controls ──
+// -- Scan controls --
 async function startScan() {
   try { await fetch('/api/scan/start', { method: 'POST' }); } catch(e) { console.error(e); }
 }
@@ -1556,7 +1556,7 @@ async function stopScan() {
   try { await fetch('/api/scan/stop', { method: 'POST' }); } catch(e) { console.error(e); }
 }
 
-// ── Polling ──
+// -- Polling --
 async function fetchJSON(url) { try { const r = await fetch(url); return await r.json(); } catch(e) { return []; } }
 
 async function pollData() {
@@ -1586,14 +1586,14 @@ async function pollData() {
     rawHosts = allHosts.filter(h => showV6 ? isIPv6(h.ip) : !isIPv6(h.ip));
     rawConflicts = allConflicts.filter(c => showV6 ? isIPv6(c.ip) : !isIPv6(c.ip));
 
-    // Build MAC→IP lookup from all hosts
+    // Build MAC->IP lookup from all hosts
     macToIP = {};
     allHosts.forEach(h => {
       macToIP[h.mac.toLowerCase()] = h.ip;
       if (h.bondMACs) h.bondMACs.forEach(m => { macToIP[m.toLowerCase()] = h.ip; });
     });
 
-    // Build IP→conflict lookup
+    // Build IP->conflict lookup
     conflictMap = {};
     rawConflicts.forEach(c => { conflictMap[c.ip] = c; });
 
@@ -1698,7 +1698,7 @@ function setBadge(id, count) {
   else { el.style.display = 'none'; }
 }
 
-// ── Grouping ──
+// -- Grouping --
 function groupBySubnet(items) {
   const groups = {}, order = [];
   items.forEach(item => {
@@ -1714,7 +1714,7 @@ function groupBySubnet(items) {
   return { groups, order };
 }
 
-// ── Subnet filter checkboxes ──
+// -- Subnet filter checkboxes --
 function updateSubnetSets(panelKey, subnets) {
   // Add newly discovered subnets (default: enabled)
   for (const s of subnets) {
@@ -1793,11 +1793,11 @@ function toggleSubnetFilter(panelKey, subnet, checked) {
   else renderConflictsTable();
 }
 
-// ── Expanded hostname tracking ──
+// -- Expanded hostname tracking --
 const expandedHostnames = new Set();
 const expandedNotes = new Set();
 
-// ── Hosts table (grouped) ──
+// -- Hosts table (grouped) --
 const hostsFields = [null, 'ip', 'hostname', 'note', 'mac'];
 
 function renderHostsTable() {
@@ -1903,7 +1903,7 @@ function renderHostsTable() {
   updateSortArrows('hosts-table');
 }
 
-// ── Conflicts table (grouped) ──
+// -- Conflicts table (grouped) --
 const conflictsFields = ['ip', 'hostname', 'macs'];
 
 function renderConflictsTable() {
@@ -1960,7 +1960,7 @@ function renderConflictsTable() {
   updateSortArrows('conflicts-table');
 }
 
-// ── Toggle collapse ──
+// -- Toggle collapse --
 function toggleSubnet(tableKey, subnet) {
   const set = collapsed[tableKey];
   if (set.has(subnet)) set.delete(subnet); else set.add(subnet);
@@ -1972,7 +1972,7 @@ function toggleVendorGroup(key) {
   renderHostsTable();
 }
 
-// ── Simple table renderer (non-grouped tables) ──
+// -- Simple table renderer (non-grouped tables) --
 function renderSimpleTable(tableId, emptyId, data, rowFn) {
   const tbody = document.querySelector('#' + tableId + ' tbody');
   const empty = document.getElementById(emptyId);
@@ -2052,7 +2052,7 @@ function renderNDPAlertRow(a) {
   return `<tr class="severity-${a.severity}"><td><span class="alert-badge badge-${sevClass}">${a.severity.toUpperCase()}</span></td><td><span class="alert-badge badge-${typeClass}">${esc(alertTypeLabel(a.alertType))}</span></td><td>${esc(a.ip)}</td><td colspan="2">${mvPairs(macs, vendors)}</td><td colspan="2"><div class="mv-pair"><span class="mv-mac">${esc(a.newMAC)}</span><span>${esc(a.newVendor||'')}</span></div></td><td><strong>${a.count||1}</strong></td><td class="datetime-cell">${esc(a.firstSeen||a.timestamp)}</td><td class="datetime-cell">${esc(a.timestamp)}</td></tr>`;
 }
 
-// ── Display mode filter ──
+// -- Display mode filter --
 function isIPv6(ip) { return ip && ip.indexOf(':') !== -1; }
 function setDisplayMode(mode) {
   displayMode = mode;
@@ -2075,7 +2075,7 @@ function updateViewSelector() {
   }
 }
 
-// ── Helpers ──
+// -- Helpers --
 function esc(s) {
   if (!s) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -2112,19 +2112,19 @@ function fieldCompare(va, vb, asc) {
   return asc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
 }
 
-// ── Sort ──
+// -- Sort --
 function sortTable(tableId, colIdx) {
   const prev = activeSort[tableId];
   if (prev && prev.col === colIdx) {
     if (prev.asc) {
-      // asc → clear sort (back to default grouping)
+      // asc -> clear sort (back to default grouping)
       delete activeSort[tableId];
     } else {
-      // desc → asc
+      // desc -> asc
       activeSort[tableId] = { col: colIdx, asc: true };
     }
   } else {
-    // New column → start descending (visible change from default order)
+    // New column -> start descending (visible change from default order)
     activeSort[tableId] = { col: colIdx, asc: false };
   }
 
@@ -2160,7 +2160,7 @@ function updateSortArrows(tableId) {
   }
 }
 
-// ── Filter ──
+// -- Filter --
 function filterTable(tableId, query) {
   activeFilter[tableId] = query;
   if (tableId === 'hosts-table') { renderHostsTable(); return; }
@@ -2174,7 +2174,7 @@ function filterTable(tableId, query) {
   });
 }
 
-// ── Alert Modal ──
+// -- Alert Modal --
 let editingAlertId = null;
 let editingOriginalCfg = null;
 
@@ -2560,7 +2560,7 @@ function renderAlertList(configs) {
   container.innerHTML = html;
 }
 
-// ── Hostname cell tap to expand/collapse ──
+// -- Hostname cell tap to expand/collapse --
 function toggleHostname(el, ip) {
   if (expandedHostnames.has(ip)) expandedHostnames.delete(ip);
   else expandedHostnames.add(ip);
@@ -2572,7 +2572,7 @@ function toggleNote(ip) {
   renderHostsTable();
 }
 
-// ── Init ──
+// -- Init --
 fetch('/api/version').then(r=>r.json()).then(d=>{document.getElementById('versionTag').textContent=d.version}).catch(()=>{});
 initTheme();
 initLanguage();

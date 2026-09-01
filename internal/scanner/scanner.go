@@ -441,7 +441,7 @@ func (s *Scanner) run() {
 
 	var scanWg sync.WaitGroup
 
-	// ── ARP Scan (IPv4, parallel branch 1) ──
+	// -- ARP Scan (IPv4, parallel branch 1) --
 	if s.ipMode != models.IPModeIPv6 && s.localIP != nil {
 		scanWg.Add(1)
 		go func() {
@@ -460,7 +460,7 @@ func (s *Scanner) run() {
 		}()
 	}
 
-	// ── NDP Scan (IPv6, parallel branch 1b) ──
+	// -- NDP Scan (IPv6, parallel branch 1b) --
 	if s.ipMode != models.IPModeIPv4 && (s.localIPv6 != nil || s.linkLocalIPv6 != nil) {
 		scanWg.Add(1)
 		go func() {
@@ -482,7 +482,7 @@ func (s *Scanner) run() {
 		}()
 	}
 
-	// ── DHCP Detection → DNS Spoofing Check (IPv4, parallel branch 2) ──
+	// -- DHCP Detection -> DNS Spoofing Check (IPv4, parallel branch 2) --
 	if s.ipMode != models.IPModeIPv6 {
 		scanWg.Add(1)
 		go func() {
@@ -502,7 +502,7 @@ func (s *Scanner) run() {
 		}()
 	}
 
-	// ── DHCPv6 Detection (IPv6, parallel branch 2b) ──
+	// -- DHCPv6 Detection (IPv6, parallel branch 2b) --
 	if s.ipMode != models.IPModeIPv4 && (s.localIPv6 != nil || s.linkLocalIPv6 != nil) {
 		scanWg.Add(1)
 		go func() {
@@ -520,7 +520,7 @@ func (s *Scanner) run() {
 		}()
 	}
 
-	// ── Protocol Listeners: HSRP/VRRP/LLDP/CDP (parallel branch 3) ──
+	// -- Protocol Listeners: HSRP/VRRP/LLDP/CDP (parallel branch 3) --
 	scanWg.Add(4)
 	go func() {
 		defer scanWg.Done()
@@ -595,7 +595,7 @@ func (s *Scanner) run() {
 		go s.backgroundNDPMonitor()
 	}
 
-	// Background note resolution (full port scan → HTTP title)
+	// Background note resolution (full port scan -> HTTP title)
 	go s.backgroundResolveNotes()
 }
 
@@ -628,7 +628,7 @@ func (s *Scanner) processARPResults(result *protocol.ARPResult) {
 			IPVersion: 4,
 		}
 
-		// Multiple MACs → check if bond or real conflict
+		// Multiple MACs -> check if bond or real conflict
 		if len(macs) > 1 {
 			devGroups := netutil.GroupMACsByDevice(macs)
 			isBond := len(devGroups) == 1
@@ -779,7 +779,7 @@ func (s *Scanner) resolveHostnames() {
 	copy(hostsCopy, s.state.Hosts)
 	s.state.Mu.RUnlock()
 
-	// In IPv6-only mode, do an internal ARP scan to obtain IPv4→MAC mappings.
+	// In IPv6-only mode, do an internal ARP scan to obtain IPv4->MAC mappings.
 	// Hostnames resolved from IPv4 will be shared to IPv6 hosts via MAC matching.
 	if s.ipMode == models.IPModeIPv6 {
 		if extra := s.arpForHostnames(); len(extra) > 0 {
@@ -826,7 +826,7 @@ func (s *Scanner) resolveHostnames() {
 	}
 	s.state.Mu.RUnlock()
 
-	// Share hostnames across hosts with same MAC (IPv4 ↔ IPv6)
+	// Share hostnames across hosts with same MAC (IPv4 <-> IPv6)
 	// Also fill from LLDP/CDP names
 	s.hostnameMu.Lock()
 	macHostname := make(map[string]string)
@@ -1009,7 +1009,7 @@ func allTCPPorts() []int {
 	return ports
 }
 
-// arpForHostnames does a quick ARP scan to get IPv4→MAC mappings for hostname resolution.
+// arpForHostnames does a quick ARP scan to get IPv4->MAC mappings for hostname resolution.
 // Used in IPv6-only mode so that hostnames resolved from IPv4 can be shared to IPv6 hosts via MAC.
 func (s *Scanner) arpForHostnames() []models.HostEntry {
 	localIP, _, err := netutil.GetInterfaceAddr(s.iface)
@@ -1249,7 +1249,7 @@ func (s *Scanner) sweepSubnets(subnets []*net.IPNet) {
 }
 
 // harvestRemoteMACs ARP-scans L2-reachable secondary subnets (Case A) from
-// per-subnet synthetic identities and merges the recovered IP→MAC pairs. Truly
+// per-subnet synthetic identities and merges the recovered IP->MAC pairs. Truly
 // routed subnets simply yield no ARP replies and fall through to the L3 probe.
 func (s *Scanner) harvestRemoteMACs(remote []*net.IPNet) {
 	if res := protocol.HarvestRemoteMACs(s.iface, remote, s.localIP, s.subnetIDs, 3*time.Second); res != nil {
@@ -1625,13 +1625,13 @@ func (s *Scanner) addConflicts(conflicts []models.ConflictEntry) []models.Confli
 // not reported as accidental IP collisions. It mutates entries in place.
 //
 // Downgrade signals (strongest first):
-//   - shared_mac: a MAC also answers for another IP → one host holds several IPs
+//   - shared_mac: a MAC also answers for another IP -> one host holds several IPs
 //     (VIP / bond / floating IP).
-//   - oui_pair:   the same set of vendor OUIs conflicts on more than one IP → a
+//   - oui_pair:   the same set of vendor OUIs conflicts on more than one IP -> a
 //     systematic multi-NIC or VIP deployment, not random collisions.
-//   - neutron:    an OpenStack (fa:16:3e) VM MAC alongside another responder → an
+//   - neutron:    an OpenStack (fa:16:3e) VM MAC alongside another responder -> an
 //     SDN/overlay ARP responder.
-//   - all_laa:    every MAC is locally-administered → virtual NICs (VM/bond).
+//   - all_laa:    every MAC is locally-administered -> virtual NICs (VM/bond).
 //
 // A genuine accidental collision - two unrelated global-vendor MACs, appearing on
 // a single IP with no repeated pattern - keeps kind "conflict".

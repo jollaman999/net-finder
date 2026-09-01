@@ -30,8 +30,8 @@ const (
 	psWindow    = 150                    // responsive samples before an adjustment
 	psMinWindow = 20                     // minimum samples for a time-based adjustment
 	psInterval  = 750 * time.Millisecond // fallback cadence when samples are sparse
-	psBackoffHi = 3.0                    // avg/base above this ⇒ congested ⇒ back off
-	psRampLo    = 1.5                    // avg/base below this ⇒ healthy ⇒ ramp up
+	psBackoffHi = 3.0                    // avg/base above this => congested => back off
+	psRampLo    = 1.5                    // avg/base below this => healthy => ramp up
 )
 
 var (
