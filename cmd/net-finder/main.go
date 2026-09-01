@@ -7,8 +7,10 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"net-finder/internal/alert"
@@ -82,6 +84,18 @@ func main() {
 	if err := netutil.InstallScanNotrack(protocol.SYNScanSrcPort()); err != nil {
 		log.Printf("SYN scan is not exempt from conntrack (%v); a full port sweep may fill the conntrack table", err)
 	}
+
+	// Take the exemption back down on the way out. The table is ours alone, so
+	// leaving it behind would exempt a port no scan is using any more. A hard
+	// kill still leaves it, which the next startup clears before reinstalling.
+	stopSig := make(chan os.Signal, 1)
+	signal.Notify(stopSig, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		sig := <-stopSig
+		netutil.RemoveScanNotrack()
+		log.Printf("Received %v, shutting down", sig)
+		os.Exit(0)
+	}()
 
 	// Get network interface
 	iface, err := netutil.GetInterfaceForMode(*ifaceName, mode)
