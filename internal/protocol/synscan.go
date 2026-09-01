@@ -19,17 +19,31 @@ import (
 // Sends go out a SOCK_RAW socket (AF_INET or AF_INET6) so the kernel handles
 // routing and L2 framing (no destination-MAC bookkeeping). Responses are captured
 // on an AF_PACKET socket with a BPF filter matching only TCP segments addressed to
-// our scan source port. The kernel, having no socket bound to that port, replies to
-// each SYN-ACK with a RST - harmless here (we already recorded the open port, and
-// the RST politely tears down the half-open connection on the target).
+// our scan source port. The kernel replies to each SYN-ACK with a RST, since no
+// connection of its own matches it - harmless here (we already recorded the open
+// port, and the RST politely tears down the half-open connection on the target).
 const (
-	synScanSrcPort uint16 = 61234      // dedicated source port for scan SYNs
-	synSeq         uint32 = 0x5C0FFEE5 // fixed initial sequence number
+	defaultSYNScanSrcPort uint16 = 61234      // source port used until one is picked
+	synSeq                uint32 = 0x5C0FFEE5 // fixed initial sequence number
 )
 
-// SYNScanSrcPort is the port above, exported so the conntrack exemption can be
-// scoped to exactly the traffic this scan produces.
-const SYNScanSrcPort = synScanSrcPort
+// synScanSrcPort is the source port scan SYNs go out from. The conntrack
+// exemption installed for the scan is keyed on this port alone, so it is picked
+// at startup (netutil.PickScanSrcPort) rather than fixed, to keep it off a port
+// something else on the host is using.
+var synScanSrcPort = defaultSYNScanSrcPort
+
+// SetSYNScanSrcPort sets the port scan SYNs go out from. Call it before any scan
+// starts; it is read without locking from then on.
+func SetSYNScanSrcPort(port uint16) {
+	synScanSrcPort = port
+}
+
+// SYNScanSrcPort is the port scan SYNs go out from, exported so the conntrack
+// exemption can be scoped to exactly the traffic this scan produces.
+func SYNScanSrcPort() uint16 {
+	return synScanSrcPort
+}
 
 // synHostState collects the open ports discovered for a single host.
 type synHostState struct {

@@ -67,11 +67,19 @@ func main() {
 	netutil.EnablePortScanAdaptive(50, *portScanRate, portScanStart)
 	netutil.SetSYNScanRate(*synRate)
 
+	// The exemption below is keyed on the scan's source port alone, so pick one
+	// nothing else on the host can be using and hold it for the run.
+	if port, err := netutil.PickScanSrcPort(protocol.SYNScanSrcPort()); err != nil {
+		log.Printf("Could not reserve a SYN scan source port (%v); staying on %d", err, protocol.SYNScanSrcPort())
+	} else {
+		protocol.SetSYNScanSrcPort(port)
+	}
+
 	// The SYN scan sends through a raw socket, so without this conntrack
 	// allocates an entry per probe and a full sweep fills the table, at which
 	// point the kernel drops packets belonging to everything else on the box.
 	// Only the scan's own port is exempted; the rest stays tracked.
-	if err := netutil.InstallScanNotrack(protocol.SYNScanSrcPort); err != nil {
+	if err := netutil.InstallScanNotrack(protocol.SYNScanSrcPort()); err != nil {
 		log.Printf("SYN scan is not exempt from conntrack (%v); a full port sweep may fill the conntrack table", err)
 	}
 
