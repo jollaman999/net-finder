@@ -1,6 +1,6 @@
 services:
   net-finder:
-    image: jollaman999/net-finder:3.0.2
+    image: jollaman999/net-finder:3.0.3
     container_name: net-finder
     network_mode: host
     cap_add:
