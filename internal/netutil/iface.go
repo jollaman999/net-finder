@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"net-finder/internal/models"
@@ -241,41 +242,131 @@ func GetInterfaceForMode(name string, mode models.IPMode) (*net.Interface, error
 		return nil, err
 	}
 
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 || len(iface.HardwareAddr) == 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		hasIPv4, hasIPv6 := false, false
-		for _, addr := range addrs {
-			if ipnet, ok := addr.(*net.IPNet); ok {
-				if ipnet.IP.To4() != nil {
-					hasIPv4 = true
-				} else if ipnet.IP.To16() != nil {
-					hasIPv6 = true
-				}
-			}
-		}
-		switch mode {
-		case models.IPModeIPv4:
-			if hasIPv4 {
-				return &iface, nil
-			}
-		case models.IPModeIPv6:
-			if hasIPv6 {
-				return &iface, nil
-			}
-		default: // Both
-			if hasIPv4 {
-				return &iface, nil
+	// The interface carrying the default route is the one this host actually
+	// reaches the network through, so it is the one worth scanning. Without
+	// this the first interface in kernel order wins, and on a box with bridges
+	// or VM taps that is rarely the right one - a libvirt virbr0 sitting at
+	// index 2 beats the real NIC at index 11 and the scan sweeps an empty
+	// /24 instead.
+	if def := DefaultRouteInterface(); def != "" {
+		for i := range ifaces {
+			if ifaces[i].Name == def && ifaceSuitsMode(&ifaces[i], mode) {
+				return &ifaces[i], nil
 			}
 		}
 	}
 
+	for i := range ifaces {
+		if ifaceSuitsMode(&ifaces[i], mode) {
+			return &ifaces[i], nil
+		}
+	}
+
 	return nil, fmt.Errorf("no suitable network interface found (mode: %s)", mode)
+}
+
+// ifaceSuitsMode reports whether iface can be scanned in the given mode.
+func ifaceSuitsMode(iface *net.Interface, mode models.IPMode) bool {
+	if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 || len(iface.HardwareAddr) == 0 {
+		return false
+	}
+
+	addrs, err := iface.Addrs()
+	if err != nil {
+		return false
+	}
+
+	hasIPv4, hasIPv6 := false, false
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok {
+			if ipnet.IP.To4() != nil {
+				hasIPv4 = true
+			} else if ipnet.IP.To16() != nil {
+				hasIPv6 = true
+			}
+		}
+	}
+
+	switch mode {
+	case models.IPModeIPv4:
+		return hasIPv4
+	case models.IPModeIPv6:
+		return hasIPv6
+	default: // Both
+		return hasIPv4
+	}
+}
+
+// DefaultRouteInterface returns the name of the interface carrying the default
+// route, IPv4 first and IPv6 as a fallback. It returns "" when there is none.
+func DefaultRouteInterface() string {
+	if name := defaultRouteInterface4(); name != "" {
+		return name
+	}
+	return defaultRouteInterface6()
+}
+
+// defaultRouteInterface4 reads /proc/net/route, whose first column is the
+// interface name. Where several default routes exist the lowest metric wins,
+// the same one the kernel would use.
+func defaultRouteInterface4() string {
+	f, err := os.Open("/proc/net/route")
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	best, bestMetric := "", 0
+
+	scanner := bufio.NewScanner(f)
+	scanner.Scan() // skip header
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 7 {
+			continue
+		}
+		// Destination all zeros is the default route. A zero gateway with it
+		// means a link-scope default, which belongs to a tunnel device that
+		// has no L2 to scan.
+		if fields[1] != "00000000" || fields[2] == "00000000" {
+			continue
+		}
+		metric, err := strconv.Atoi(fields[6])
+		if err != nil {
+			continue
+		}
+		if best == "" || metric < bestMetric {
+			best, bestMetric = fields[0], metric
+		}
+	}
+
+	return best
+}
+
+// defaultRouteInterface6 reads /proc/net/ipv6_route, whose last column is the
+// interface name.
+func defaultRouteInterface6() string {
+	f, err := os.Open("/proc/net/ipv6_route")
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	const zeroV6 = "00000000000000000000000000000000"
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 10 {
+			continue
+		}
+		// fields[0]=dest, fields[1]=dest_prefix_len, fields[4]=next_hop, fields[9]=dev
+		if fields[0] == zeroV6 && fields[1] == "00" && fields[4] != zeroV6 {
+			return fields[9]
+		}
+	}
+
+	return ""
 }
 
 // GetInterfaceAddrV6 returns the global IPv6, link-local IPv6 and MAC for an interface
